@@ -72,6 +72,8 @@ Each secret is a separate file mounted read-only only into the containers that n
 - `pytest -q -m stack`: builds and starts a test stack with local fixture pages and a proxy test profile, runs the isolation canaries, and tears it down. It uses the `10.80.0.0/16` Docker subnets; do not run it next to another stack that uses them.
 - `node --test proxy/egress-proxy.test.mjs`: the proxy's own suite.
 
+**Status:** the network-free suite (316 tests) and the proxy suite (126 tests) pass on this version. The `-m stack` suite, which runs the real containers and the isolation canaries, has not yet been re-run on this version. Run it yourself before relying on the isolation.
+
 ## Reading the logs and reports
 
 False holds are an upper bound: nobody labels pages, so a hold that Web Risk does not list is *unconfirmed*, not false. Web Risk positive means the address is listed; negative does not mean safe. Agreement with Web Risk is consistent, not independent. Unreadable pages are held by policy and counted apart. The weekly report prints no percentage for a group under 30 pages.
