@@ -1,0 +1,17 @@
+.venv/
+.venv*/
+node_modules/
+.scratch/
+__pycache__/
+*.pyc
+.pytest_cache/
+# secrets, data and logs never go into git
+.env
+*.env
+secrets/
+*.key
+*.jsonl
+*.sqlite
+*.sqlite-journal
+data/
+logs/

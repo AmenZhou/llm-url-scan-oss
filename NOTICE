@@ -1,0 +1,11 @@
+llm-url-scan
+Copyright 2026 The llm-url-scan contributors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party material:
+
+- docker/seccomp_profile.json is Playwright's documented seccomp profile
+  (microsoft/playwright, utils/docker/seccomp_profile.json at v1.55.0),
+  Copyright (c) Microsoft Corporation, licensed under the Apache License 2.0.
+  It is included unchanged.

@@ -1,0 +1,182 @@
+# llm-url-scan stack. Production topology; docker-compose.test.yml adds the local fixtures for the stack tests.
+#
+#   docker compose up -d --build        (needs EGRESS_BLOCK_EXTRA_CIDRS in the environment: a CIDR list, or the exact word none; the proxy refuses to start without it)
+#   docker compose down
+#
+# Networks: api-net (internal) api <-> capture; cap-net (internal) capture <-> proxy, the browser's only way out; egress-net proxy -> public network;
+# out-net api and scheduler -> Anthropic and Google, not reachable from capture. Nothing is published except the API on host loopback.
+# Secrets: each one is its own file, mounted read-only into the containers that need it and nowhere else. The host data dir is mounted whole, but its
+# secrets/ folder is covered by an empty tmpfs, so a container sees only the secret files listed under its own volumes.
+name: llm-url-scan
+
+x-hardened: &hardened
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pull_policy: never          # images are built locally (docker compose build); nothing is pulled at run time
+  logging: &logs
+    driver: local
+    options: {max-size: "10m", max-file: "3"}
+
+networks:
+  api-net:
+    internal: true
+    ipam: {config: [{subnet: 10.80.3.0/24}]}
+  cap-net:
+    internal: true
+    ipam: {config: [{subnet: 10.80.1.0/24}]}
+  egress-net:
+    ipam: {config: [{subnet: 10.80.2.0/24}]}
+  out-net:
+    ipam: {config: [{subnet: 10.80.4.0/24}]}
+
+volumes:
+  worker-token: {}          # the worker token, written fresh by token-init on every start; mounted only into api and capture
+
+services:
+  token-init:
+    <<: *hardened
+    image: llm-url-scan-api:local
+    user: root
+    command: ["python", "-c", "import secrets; open('/run/worker/worker_token', 'w').write(secrets.token_hex(32))"]
+    restart: "no"
+    volumes: ["worker-token:/run/worker"]
+    network_mode: none
+
+  proxy:
+    <<: *hardened
+    image: llm-url-scan-proxy:local
+    build: {context: ., dockerfile: docker/Dockerfile.proxy}
+    user: node
+    mem_limit: 512m
+    environment:
+      EGRESS_PROFILE: production
+      EGRESS_BLOCK_EXTRA_CIDRS: ${EGRESS_BLOCK_EXTRA_CIDRS:-}      # empty makes the proxy exit 2: set your VPN and company ranges, or the exact word none
+      EGRESS_DNS_SERVERS: ${EGRESS_DNS_SERVERS:-}                  # optional explicit resolvers; empty = the Docker resolver
+      EGRESS_ALLOWED_PORTS: ${EGRESS_ALLOWED_PORTS:-}              # optional; empty = 80 and 443
+      EGRESS_LISTEN: "0.0.0.0:3128"
+      EGRESS_SLOT_PORTS: "3128,3129"                               # one listener per capture slot, slot id = position
+      EGRESS_MAX_LIFETIME_MS: "120000"
+      EGRESS_MAX_TUNNEL_BYTES: "67108864"
+      EGRESS_IDLE_TIMEOUT_MS: "20000"
+      EGRESS_MAX_CONNECTIONS: "2048"
+    networks:
+      cap-net: {ipv4_address: 10.80.1.2}
+      egress-net: {ipv4_address: 10.80.2.2}
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3128/__health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 3s
+    logging: *logs
+
+  capture:
+    <<: *hardened
+    image: llm-url-scan-capture:local
+    build: {context: ., dockerfile: docker/Dockerfile.capture}
+    # Chromium's own sandbox is on; the container is non-root with every capability dropped, and Playwright's documented seccomp profile allows the
+    # user-namespace clone the sandbox needs. --no-sandbox is never used.
+    # The profile (Playwright's, byte for byte) allows chroot only for a container that holds CAP_SYS_CHROOT, and Chromium's sandbox calls chroot after it
+    # makes its own user namespace. So SYS_CHROOT is the one capability added back; a non-root process with no-new-privileges has it in the bounding set
+    # only (CapEff is 0, checked by the sandbox test).
+    cap_add: [SYS_CHROOT]
+    security_opt: ["no-new-privileges:true", "seccomp=./docker/seccomp_profile.json"]
+    shm_size: 1gb
+    mem_limit: 3g
+    cpus: 2
+    pids_limit: 512
+    ulimits: {core: 0}      # no core dumps
+    tmpfs: ["/tmp:size=512m,mode=1777"]
+    environment:
+      CAPTURE_BIND: 10.80.3.11          # the worker listens on its api-net address only
+      CAPTURE_PROXY_HOST: proxy
+      CAPTURE_SLOTS: "2"
+      CAPTURE_PAGE_TIMEOUT_MS: ${CAPTURE_PAGE_TIMEOUT_MS:-60000}
+      CAPTURE_WAIT_MS: ${CAPTURE_WAIT_MS:-5000}
+    volumes: ["worker-token:/run/worker:ro"]      # the worker token and nothing else: no key, no data
+    networks:
+      api-net: {ipv4_address: 10.80.3.11}
+      cap-net: {ipv4_address: 10.80.1.11}
+    depends_on:
+      proxy: {condition: service_healthy}
+      token-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import json,urllib.request as u,sys; sys.exit(0 if json.load(u.build_opener(u.ProxyHandler({})).open('http://10.80.3.11:7100/healthz', timeout=4))['ready'] else 1)"]
+      interval: 5s
+      timeout: 6s
+      retries: 40
+      start_period: 20s
+    logging: *logs
+
+  api:
+    <<: *hardened
+    image: llm-url-scan-api:local
+    build: {context: ., dockerfile: docker/Dockerfile.api}
+    user: "${LLMURL_UID:-10001}:${LLMURL_GID:-10001}"
+    tmpfs: ["/tmp", "/data/secrets:mode=0555"]      # covers the host secrets folder; the files below are mounted over it one by one
+    ulimits: {core: 0}
+    command: ["python", "-m", "llm_url_scan", "serve"]
+    environment:
+      LLMURL_DATA_DIR: /data
+      LLMURL_HOST: 10.80.4.10                       # uvicorn binds to the out-net address only, not to api-net
+      LLMURL_PORT: "8800"
+      LLMURL_WORKER_URL: http://10.80.3.11:7100
+      LLMURL_WORKER_TOKEN_FILE: /run/worker/worker_token
+      LLMURL_ANTHROPIC_KEY_FILE: /run/keys/anthropic.env
+      LLMURL_ANTHROPIC_KEY_VAR: ${LLMURL_ANTHROPIC_KEY_VAR:-LLMURL_ANTHROPIC_API_KEY}
+      LLMURL_WEBRISK_KEY_FILE: /run/keys/webrisk.env
+      LLMURL_DAILY_CAP_USD: ${LLMURL_DAILY_CAP_USD:-2.0}
+      LLMURL_TOTAL_CAP_USD: ${LLMURL_TOTAL_CAP_USD:-20.0}
+      LLMURL_RUN_CAP_USD: ${LLMURL_RUN_CAP_USD:-}
+      LLMURL_RUN_START: ${LLMURL_RUN_START:-}
+      # LLMURL_TEST_MODE is deliberately NOT passed through from the shell: only docker-compose.test.yml sets it.
+    volumes:
+      - ${LLMURL_DATA_DIR:-./data}:/data
+      - worker-token:/run/worker:ro
+      - ${LLMURL_ANTHROPIC_KEY_FILE:-./secrets/anthropic.env}:/run/keys/anthropic.env:ro
+      - ${LLMURL_WEBRISK_KEY_FILE:-./secrets/webrisk.env}:/run/keys/webrisk.env:ro
+      # salt (current version only), the PUBLIC recheck key and the caller hashes. Not the private key and not the caller tokens.
+      - ${LLMURL_DATA_DIR:-./data}/secrets/hid_salt.${LLMURL_SALT_VERSION:-1}:/data/secrets/hid_salt.${LLMURL_SALT_VERSION:-1}:ro
+      - ${LLMURL_DATA_DIR:-./data}/secrets/recheck_public.key:/data/secrets/recheck_public.key:ro
+      - ${LLMURL_DATA_DIR:-./data}/secrets/callers.json:/data/secrets/callers.json:ro
+    ports: ["127.0.0.1:${LLMURL_PUBLISH_PORT:-8800}:8800"]
+    networks:
+      api-net: {ipv4_address: 10.80.3.10}
+      out-net: {ipv4_address: 10.80.4.10}
+    depends_on:
+      capture: {condition: service_healthy}
+      token-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u,sys; sys.exit(0 if u.build_opener(u.ProxyHandler({})).open('http://10.80.4.10:8800/healthz', timeout=4).read()==b'ok' else 1)"]
+      interval: 5s
+      timeout: 6s
+      retries: 20
+      start_period: 5s
+    logging: *logs
+
+  scheduler:
+    <<: *hardened
+    image: llm-url-scan-api:local
+    user: "${LLMURL_UID:-10001}:${LLMURL_GID:-10001}"
+    tmpfs: ["/tmp", "/data/secrets:mode=0555"]
+    ulimits: {core: 0}
+    command: ["python", "-m", "llm_url_scan", "recheck-loop"]
+    environment:
+      LLMURL_DATA_DIR: /data
+      LLMURL_API_URL: http://10.80.4.10:8800        # the API's out-net address; the scheduler hands over addresses for the 6 h recheck
+      LLMURL_WEBRISK_KEY_FILE: /run/keys/webrisk.env
+      LLMURL_DAILY_CAP_USD: ${LLMURL_DAILY_CAP_USD:-2.0}
+      LLMURL_TOTAL_CAP_USD: ${LLMURL_TOTAL_CAP_USD:-20.0}
+    volumes:
+      - ${LLMURL_DATA_DIR:-./data}:/data
+      - ${LLMURL_WEBRISK_KEY_FILE:-./secrets/webrisk.env}:/run/keys/webrisk.env:ro
+      # the PRIVATE recheck key and its own caller token. Not the salt, not the Anthropic key, not the public key.
+      - ${LLMURL_DATA_DIR:-./data}/secrets/recheck_private.key:/data/secrets/recheck_private.key:ro
+      - ${LLMURL_DATA_DIR:-./data}/secrets/caller_token_scheduler:/data/secrets/caller_token_scheduler:ro
+    networks:
+      out-net: {ipv4_address: 10.80.4.11}
+    depends_on:
+      api: {condition: service_healthy}
+    logging: *logs

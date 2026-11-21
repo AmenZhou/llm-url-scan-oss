@@ -1,0 +1,7 @@
+# egress proxy: the Node proxy (proxy/egress-proxy.mjs) and its classifier. Node 24 LTS slim, no dependency. Build context: the repo root.
+# node:24-trixie-slim
+FROM node@sha256:173f125896c3b47ddf056734c7ea789d04595a6a08769a8f78e0df642781fb66
+WORKDIR /app
+COPY proxy/classify.mjs proxy/egress-proxy.mjs /app/
+USER node
+CMD ["node", "/app/egress-proxy.mjs"]

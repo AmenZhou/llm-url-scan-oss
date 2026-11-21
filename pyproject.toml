@@ -1,0 +1,28 @@
+[project]
+name = "llm-url-scan"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi==0.163.1",
+  "uvicorn==0.54.0",
+  "anthropic==2.9.0",
+  "httpx2==2.16.2",
+  "cryptography==50.0.2",
+]
+
+[project.optional-dependencies]
+test = ["pytest==9.2.0", "httpx==0.28.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "stack: needs the Docker compose stack; skipped by default",
+  "live: needs real API keys; skipped by default",
+]
+addopts = "-m 'not stack and not live'"
+
+[tool.setuptools]
+packages = ["llm_url_scan"]
+
+[tool.setuptools.package-data]
+llm_url_scan = ["prompts/*.md"]

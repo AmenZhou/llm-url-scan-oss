@@ -1,0 +1,47 @@
+# Stack tests only: docker compose -f docker-compose.yml -f docker-compose.test.yml ...  (tests/test_stack.py does this; see README).
+# Adds a local fixture server, runs the proxy in its TEST profile with a one-entry pinned allowlist (the fixture), shortens the page timeouts and turns on the
+# API's test mode (a fake judge and a fake Web Risk, no key). Never use this file for real addresses.
+networks:
+  fixture-net:
+    internal: true
+    ipam: {config: [{subnet: 10.80.5.0/24}]}
+
+services:
+  fixtures:
+    image: llm-url-scan-api:local
+    pull_policy: never
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    command: ["python", "/fixture/fixtures.py"]
+    volumes: ["./tests/stack/fixtures.py:/fixture/fixtures.py:ro"]
+    networks:
+      fixture-net: {ipv4_address: 10.80.5.10, aliases: [fx.example, refused.example]}      # refused.example is not in the allowlist: it resolves to a private address
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u,sys; sys.exit(0 if u.build_opener(u.ProxyHandler({})).open('http://127.0.0.1:8080/ok', timeout=3).status==200 else 1)"]
+      interval: 3s
+      timeout: 4s
+      retries: 20
+
+  proxy:
+    command: ["node", "/app/egress-proxy.mjs", "--test-profile"]
+    environment:
+      EGRESS_PROFILE: test
+      EGRESS_ALLOWLIST_FILE: /allow.json
+      EGRESS_BLOCK_EXTRA_CIDRS: "10.80.0.0/16"
+    volumes: ["./tests/stack/allowlist.json:/allow.json:ro"]
+    networks:
+      fixture-net: {ipv4_address: 10.80.5.2}
+    depends_on:
+      fixtures: {condition: service_healthy}
+
+  capture:
+    environment:
+      CAPTURE_PAGE_TIMEOUT_MS: "4000"
+      CAPTURE_WAIT_MS: "300"
+
+  api:
+    environment:
+      LLMURL_TEST_MODE: "1"
+      LLMURL_TEST_MODE_I_UNDERSTAND_THIS_JUDGES_NOTHING: "1"

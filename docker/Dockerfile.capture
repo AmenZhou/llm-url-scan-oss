@@ -1,0 +1,9 @@
+# capture worker: Playwright image (Chromium preinstalled; pinned by digest) plus the matching playwright Python package (system site, the image has no venv module).
+# Only three files of this project go in: __init__, pagetext and capture_worker. Build context: the repo root.
+FROM mcr.microsoft.com/playwright/python@sha256:640d578aae63cfb632461d1b0aecb01414e4e020864ac3dd45a868dc0eff3078
+RUN python3 -m pip install --no-cache-dir --break-system-packages playwright==1.55.0
+WORKDIR /app
+COPY llm_url_scan/__init__.py llm_url_scan/pagetext.py llm_url_scan/capture_worker.py /app/llm_url_scan/
+USER pwuser
+ENV HOME=/tmp
+CMD ["python3", "-m", "llm_url_scan.capture_worker"]

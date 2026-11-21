@@ -1,0 +1,14 @@
+.git
+.venv
+.venv*/
+.scratch/
+.scratch
+data/
+secrets/
+.pytest_cache
+__pycache__
+tests
+*.env
+*.key
+*.jsonl
+*.sqlite
