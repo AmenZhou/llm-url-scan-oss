@@ -38,7 +38,7 @@ echo 'LLMURL_ANTHROPIC_API_KEY=...' > secrets/anthropic.env
 echo 'LLMURL_WEBRISK_API_KEY=...'   > secrets/webrisk.env
 export LLMURL_SALT_VERSION=1
 export LLMURL_RUN_CAP_USD=1 LLMURL_RUN_START=$(date +%Y-%m-%d)   # optional spend cap for this run
-docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f demo/docker-compose.demo.yml up -d --build --wait
+docker compose -p llm-url-scan-demo -f docker-compose.yml -f docker-compose.smoke.yml -f demo/docker-compose.demo.yml up -d --build --wait
 .venv/bin/python demo/server.py --data-dir "$LLMURL_DATA_DIR"
 ```
 
@@ -49,7 +49,7 @@ Open <http://127.0.0.1:8090/>. Use `--port` to change the demo port and `--api` 
 Press Ctrl-C in the terminal running `demo/server.py`, then:
 
 ```
-docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f demo/docker-compose.demo.yml down -v --remove-orphans
+docker compose -p llm-url-scan-demo -f docker-compose.yml -f docker-compose.smoke.yml -f demo/docker-compose.demo.yml down -v --remove-orphans
 ```
 
 Delete `data/` yourself if you want the scan log and the sealed recheck store gone.

@@ -1,5 +1,6 @@
 # Demo overlay: use it LAST, after the main file and the smoke overlay (see demo/README.md).
-#   docker compose -f docker-compose.yml -f docker-compose.smoke.yml -f demo/docker-compose.demo.yml ...
+#   docker compose -p llm-url-scan-demo -f docker-compose.yml -f docker-compose.smoke.yml -f demo/docker-compose.demo.yml ...
+# Always pass -p llm-url-scan-demo: without it the stack shares the project name of a normal stack, and `down` would remove that stack's containers.
 # Adds three more made-up host names for the fixture container and swaps the proxy's test allowlist for demo/allowlist.json (same mechanism and mount
 # point as the test profile). The names exist only as aliases on the internal fixture-net; they resolve nowhere else. Real judge: needs your own keys.
 # Uses the 10.80.0.0/16 subnets, like every file of this stack: do not run it next to another stack that uses them.
