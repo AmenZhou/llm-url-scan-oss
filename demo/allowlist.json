@@ -1,0 +1,4 @@
+[{"id": "fx", "name": "fx.example", "port": 8080},
+ {"id": "quillfisher", "name": "quillfisher.example", "port": 8080},
+ {"id": "parcelhop", "name": "parcelhop.example", "port": 8080},
+ {"id": "rewards", "name": "quillfisher-rewards.example", "port": 8080}]

@@ -72,7 +72,11 @@ Each secret is a separate file mounted read-only only into the containers that n
 - `pytest -q -m stack`: builds and starts a test stack with local fixture pages and a proxy test profile, runs the isolation canaries, and tears it down. It uses the `10.80.0.0/16` Docker subnets; do not run it next to another stack that uses them.
 - `node --test proxy/egress-proxy.test.mjs`: the proxy's own suite.
 
-**Status:** the network-free suite (316 tests) and the proxy suite (126 tests) pass on this version. The `-m stack` suite, which runs the real containers and the isolation canaries, has not yet been re-run on this version. Run it yourself before relying on the isolation.
+**Status:** the network-free suite (339 tests, 23 of them for the demo server and its fixtures) and the proxy suite (126 tests) pass on this version. The `-m stack` suite, which runs the real containers and the isolation canaries, has not yet been re-run on this version. Run it yourself before relying on the isolation.
+
+## Demo
+
+`demo/` holds a live local demo page: ten made-up pages, each scanned by the real service with the real judge (about USD 0.01 per scan), shown next to the outcome it was designed for. See `demo/README.md` for the commands. It uses the same `10.80.0.0/16` subnets as the stack tests. It has been built and tested offline only; it has not been run live yet.
 
 ## Reading the logs and reports
 

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>llm-url-scan demo</title>
+<style nonce="__NONCE__">
+:root { color-scheme: light dark; --bg:#fafaf7; --fg:#1d1d1b; --muted:#5d5d57; --card:#fff; --line:#d8d8d0; --accent:#1f5fbf; --pass:#1b6e3c; --hold:#a4331f; --warn:#fff4d6; --warnfg:#5c4300; }
+@media (prefers-color-scheme: dark) { :root { --bg:#161715; --fg:#ecece6; --muted:#a2a29a; --card:#20211f; --line:#3a3b37; --accent:#7fb0ff; --pass:#6fd199; --hold:#ff9a86; --warn:#3a3016; --warnfg:#f0d48a; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, sans-serif; }
+main { max-width:960px; margin:0 auto; padding:16px; }
+h1 { font-size:1.6rem; margin:.4em 0 .2em; }
+.note { background:var(--warn); color:var(--warnfg); border-radius:8px; padding:10px 14px; margin:12px 0; }
+.note p { margin:.3em 0; }
+.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:14px; padding:0; list-style:none; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:8px; }
+.card h2 { font-size:1.05rem; margin:0; }
+.muted { color:var(--muted); font-size:.92rem; margin:0; }
+.exp { font-size:.92rem; margin:0; }
+button { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; align-self:flex-start; }
+@media (prefers-color-scheme: dark) { button { color:#10131a; } }
+button:disabled { opacity:.5; cursor:not-allowed; }
+:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+.res { border-top:1px solid var(--line); padding-top:8px; font-size:.95rem; }
+.badge { display:inline-block; font-weight:700; padding:1px 10px; border-radius:99px; border:2px solid currentColor; }
+.pass { color:var(--pass); } .hold { color:var(--hold); }
+.match { font-weight:600; }
+details { margin-top:6px; } pre { white-space:pre-wrap; word-break:break-word; font-size:.8rem; background:var(--bg); border:1px solid var(--line); padding:8px; border-radius:6px; max-height:260px; overflow:auto; }
+#status { position:sticky; top:0; background:var(--bg); padding:8px 0; border-bottom:1px solid var(--line); font-weight:600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>llm-url-scan: live local demo</h1>
+  <p class="muted">Ten made-up pages served inside a local test network. Press Scan and the real service captures the page in its isolated browser and asks the real model whether it looks like phishing. The answer is advisory only.</p>
+  <div class="note">
+    <p><strong>Every scan calls the real Anthropic API</strong> and costs about USD 0.01 (a little more when the second model also runs). Pages that cannot be read cost nothing.</p>
+    <p>The expected outcome on each card is a design, not a guarantee. Ten made-up pages show nothing about accuracy: a match does not prove the service is good, and a miss does not prove it is bad.</p>
+  </div>
+  <div id="status" role="status" aria-live="polite">Ready. One scan runs at a time.</div>
+  <ul class="grid" id="grid"></ul>
+</main>
+<script nonce="__NONCE__">
+"use strict";
+var REASONS = {
+  pass_haiku: "The first model found nothing suspicious.",
+  pass_sonnet_confirmed_short: "A short page: the first model passed it and the second model agreed.",
+  hold_haiku_cannot_tell: "The first model could not tell.",
+  hold_sonnet_cannot_tell: "The second model could not tell, so the page is held.",
+  unreadable_gone: "The page is gone (not found), so nothing could be judged.",
+  unreadable_site_blocked: "The site blocked the browser, so nothing could be judged.",
+  unreadable_proxy_refused: "The egress proxy refused the address.",
+  unreadable_other: "The page did not answer in time, so nothing could be judged."
+};
+var grid = document.getElementById("grid"), statusEl = document.getElementById("status"), buttons = [];
+
+function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+function reasonText(code) {
+  if (!code) return "";
+  if (REASONS[code]) return REASONS[code];
+  return code.indexOf("hold_") === 0 ? "A model held the page (code " + code + ")." : "Code " + code + ".";
+}
+function setBusy(b, msg) { buttons.forEach(function (x) { x.disabled = b; }); statusEl.textContent = msg; }
+
+function show(card, r) {
+  var box = card.querySelector(".res"); box.textContent = "";
+  var line = el("p");
+  var badge = el("span", "badge " + r.decision, r.decision.toUpperCase());
+  line.appendChild(badge); line.appendChild(document.createTextNode(" in " + (r.latency_ms / 1000).toFixed(1) + " s"));
+  box.appendChild(line);
+  box.appendChild(el("p", "", reasonText(r.reason)));
+  var f = r.flags, bits = [];
+  bits.push(f.readable ? "page read" : "page not read");
+  if (f.models_run && f.models_run.length) bits.push(f.models_run.length + (f.models_run.length === 1 ? " model" : " models") + " ran");
+  if (f.short) bits.push("short page");
+  if (f.injection_text) bits.push("model flagged hidden instructions");
+  if (f.rules && f.rules.length) bits.push("rules: " + f.rules.join(", "));
+  box.appendChild(el("p", "muted", bits.join(" | ")));
+  box.appendChild(el("p", "match", r.matched ? "Matches the design." : "Differs from the design (expected " + r.expected.decision + ")."));
+  var d = el("details"); d.appendChild(el("summary", "", "Raw answer"));
+  d.appendChild(el("pre", "", JSON.stringify(r.answer, null, 2))); box.appendChild(d);
+}
+
+function scan(p, card) {
+  var box = card.querySelector(".res"); box.textContent = "";
+  setBusy(true, "Scanning “" + p.title + "” … this can take up to a minute.");
+  fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: p.id }) })
+    .then(function (resp) { return resp.json().then(function (j) { return { ok: resp.ok, j: j }; }); })
+    .then(function (x) {
+      if (x.ok) { show(card, x.j); setBusy(false, "Done: “" + p.title + "” was " + x.j.decision + (x.j.matched ? ", as designed." : ", not as designed.")); }
+      else { box.appendChild(el("p", "hold", "No answer: " + (x.j.error === "busy" ? "another scan is running." : "the service did not give a verdict (" + (x.j.service_code || x.j.error) + ").")));
+             setBusy(false, "The scan did not complete."); }
+    })
+    .catch(function () { box.appendChild(el("p", "hold", "No answer: the demo server could not be reached.")); setBusy(false, "The scan did not complete."); });
+}
+
+fetch("/api/pages").then(function (r) { return r.json(); }).then(function (j) {
+  j.pages.forEach(function (p) {
+    var li = el("li", "card"), h = el("h2", "", p.title); h.id = "t-" + p.id;
+    li.appendChild(h); li.appendChild(el("p", "muted", p.what));
+    var e = el("p", "exp"); e.appendChild(el("strong", "", "Designed outcome: ")); e.appendChild(document.createTextNode(p.expected.decision + ". " + p.expected.why));
+    li.appendChild(e);
+    var b = el("button", "", "Scan"); b.type = "button"; b.setAttribute("aria-label", "Scan: " + p.title);
+    b.addEventListener("click", function () { scan(p, li); });
+    buttons.push(b); li.appendChild(b);
+    var res = el("div", "res"); res.setAttribute("aria-live", "polite"); li.appendChild(res);
+    grid.appendChild(li);
+  });
+}).catch(function () { statusEl.textContent = "Could not load the page list."; });
+</script>
+</body>
+</html>
