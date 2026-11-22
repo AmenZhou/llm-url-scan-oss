@@ -1,10 +1,11 @@
 """Local demo server for llm-url-scan. Standard library only. Serves demo/page.html and a tiny JSON API on loopback.
 
-The browser never sends an address: it sends a page id from the fixed list below, and this server maps it to a made-up page that only the compose
-test network can reach, then calls the real service API with the owner token read from the data dir. Every scan on this page is a real scan: real
-capture, real judge (a few cents of Anthropic spend). Logs hold ids and status codes only; no exception text or page text leaves this process.
+The browser sends either a page id from the fixed list below or a URL. By default a URL is accepted only if it is one of the made-up sample pages, which
+only the compose test network can reach. With --open-urls any http(s) URL is accepted (run the normal stack, not the demo allowlist: the URL goes to
+Anthropic and Google Web Risk). The server calls the real service API with the owner token read from the data dir. Every scan on this page is a real scan:
+real capture, real judge (a few cents of Anthropic spend). Logs hold ids and status codes only; no address, exception text or page text leaves this process.
 
-  python demo/server.py --data-dir ./data [--port 8090] [--api http://127.0.0.1:8800]
+  python demo/server.py --data-dir ./data [--port 8090] [--api http://127.0.0.1:8800] [--open-urls]
 """
 import argparse
 import json
@@ -16,6 +17,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
 FX = "fx.example"
@@ -33,7 +35,7 @@ PAGES = [
      "why": "Unreadable pages are held by policy and no model runs."},
     {"id": "wall", "title": "Blocked page", "what": "Answers 403 Forbidden with a bare wall.", "host": FX, "path": "/403", "decision": "hold",
      "why": "Unreadable pages are held by policy and no model runs."},
-    {"id": "hang", "title": "Page that never answers", "what": "Waits far longer than the capture allows. Takes about a minute.", "host": FX, "path": "/hang",
+    {"id": "hang", "title": "Page that never answers", "what": "Waits far longer than the capture allows. Takes several seconds.", "host": FX, "path": "/hang",
      "decision": "hold", "why": "Two tries, then an unreadable hold."},
     {"id": "login", "title": "Ordinary sign-in page", "what": "Sign-in page of an invented note-taking product, Quillfisher Notes.", "host": "quillfisher.example", "path": "/login",
      "decision": "pass", "why": "A normal product page with a normal sign-in form."},
@@ -44,17 +46,34 @@ PAGES = [
 ]
 BY_ID = {p["id"]: p for p in PAGES}
 FIXTURE_PORT = 8080
-BODY_CAP = 1024
+URL_MAX = 2048
+BODY_CAP = 2200
 API_TIMEOUT = 240
+# Sample links shown in --open-urls mode (the made-up pages do not exist there). Harmless, well-known pages only.
+OPEN_SAMPLES = [{"title": "example.com", "url": "https://example.com/"}, {"title": "Wikipedia home page", "url": "https://www.wikipedia.org/"}]
 
 
 def page_url(p):
     return "http://%s:%d%s" % (p["host"], FIXTURE_PORT, p["path"])
 
 
+BY_URL = {page_url(p): p for p in PAGES}
+
+
+def valid_url(u):
+    """A plain http(s) address: no whitespace or control characters, a host, no user:password. The service checks it again."""
+    if not isinstance(u, str) or not 1 <= len(u) <= URL_MAX or any(c.isspace() or ord(c) < 32 for c in u):
+        return False
+    try:
+        s = urlsplit(u)
+        return s.scheme in ("http", "https") and bool(s.hostname) and not s.username and not s.password
+    except ValueError:
+        return False
+
+
 def public_pages():
-    """What the browser may see: no address."""
-    return [{"id": p["id"], "title": p["title"], "what": p["what"], "expected": {"decision": p["decision"], "why": p["why"]}} for p in PAGES]
+    """What the browser may see: the ten made-up sample pages, with their made-up addresses."""
+    return [{"id": p["id"], "title": p["title"], "what": p["what"], "url": page_url(p), "expected": {"decision": p["decision"], "why": p["why"]}} for p in PAGES]
 
 
 def flags_of(a):
@@ -89,8 +108,8 @@ class ApiClient:
                 return e.code, {"error": "internal"}
 
 
-def make_server(client, port, page_html=None):
-    """A ThreadingHTTPServer on 127.0.0.1:port (0 = any). `client` has .scan(url) -> (status, dict)."""
+def make_server(client, port, page_html=None, open_urls=False):
+    """A ThreadingHTTPServer on 127.0.0.1:port (0 = any). `client` has .scan(url) -> (status, dict). open_urls: accept any http(s) URL."""
     html = page_html if page_html is not None else (HERE / "page.html").read_text(encoding="utf-8")
     busy = threading.Lock()
 
@@ -150,7 +169,7 @@ def make_server(client, port, page_html=None):
                 nonce = secrets.token_urlsafe(18)
                 self._send(200, html.replace("__NONCE__", nonce), "text/html; charset=utf-8", nonce)
             elif path == "/api/pages":
-                self._json(200, {"pages": public_pages()})
+                self._json(200, {"open": open_urls, "pages": [] if open_urls else public_pages(), "samples": OPEN_SAMPLES if open_urls else []})
             else:
                 self._json(404, {"error": "not_found"})
 
@@ -168,25 +187,36 @@ def make_server(client, port, page_html=None):
                 obj = json.loads(self.rfile.read(int(n)))
             except ValueError:
                 return self._json(400, {"error": "bad_request"})
-            pid = obj.get("id") if isinstance(obj, dict) and set(obj) == {"id"} else None
-            if not isinstance(pid, str) or pid not in BY_ID:      # exact match against the fixed list; nothing else reaches the service
+            if isinstance(obj, dict) and set(obj) == {"id"}:      # a card: exact match against the fixed list
+                pid = obj["id"]
+                if not isinstance(pid, str) or pid not in BY_ID:
+                    return self._json(400, {"error": "bad_request"})
+                url, p = page_url(BY_ID[pid]), BY_ID[pid]
+            elif isinstance(obj, dict) and set(obj) == {"url"}:      # the input box or a sample link
+                url = obj["url"]
+                if not valid_url(url):
+                    return self._json(400, {"error": "bad_request"})
+                p = BY_URL.get(url)
+                if p is None and not open_urls:      # default mode: only the made-up sample pages reach the service
+                    return self._json(400, {"error": "not_allowed_in_this_mode"})
+            else:
                 return self._json(400, {"error": "bad_request"})
             if not busy.acquire(blocking=False):
                 return self._json(409, {"error": "busy"})
             try:
                 t0 = time.monotonic()
                 try:
-                    status, answer = client.scan(page_url(BY_ID[pid]))
+                    status, answer = client.scan(url)
                 except Exception:
                     return self._json(502, {"error": "service_unreachable"})
                 ms = int((time.monotonic() - t0) * 1000)
                 if status != 200 or not isinstance(answer, dict) or "decision" not in answer:
                     code = answer.get("error") if isinstance(answer, dict) and isinstance(answer.get("error"), str) and len(answer["error"]) < 40 else "internal"
                     return self._json(502, {"error": "service_refused", "service_status": status, "service_code": code})
-                p = BY_ID[pid]
-                self._json(200, {"id": pid, "title": p["title"], "decision": answer["decision"], "reason": answer.get("reason"), "flags": flags_of(answer),
-                                 "latency_ms": ms, "expected": {"decision": p["decision"], "why": p["why"]}, "matched": judge_match(p, answer["decision"]),
-                                 "answer": answer})
+                self._json(200, {"id": p["id"] if p else None, "title": p["title"] if p else "Your URL", "decision": answer["decision"],
+                                 "reason": answer.get("reason"), "flags": flags_of(answer), "latency_ms": ms,
+                                 "expected": {"decision": p["decision"], "why": p["why"]} if p else None,      # a URL of your own has no designed outcome
+                                 "matched": judge_match(p, answer["decision"]) if p else None, "answer": answer})      # the address is never echoed
             finally:
                 busy.release()
 
@@ -198,13 +228,14 @@ def main():
     ap.add_argument("--data-dir", required=True, help="the service data dir; the owner token is read from <data-dir>/secrets/caller_token_owner")
     ap.add_argument("--port", type=int, default=8090)
     ap.add_argument("--api", default="http://127.0.0.1:8800", help="the service address (the published port of the compose api)")
+    ap.add_argument("--open-urls", action="store_true", help="accept any http(s) URL (run the normal stack, not the demo allowlist; the URL goes to Anthropic and Google Web Risk)")
     a = ap.parse_args()
     try:
         token = (Path(a.data_dir) / "secrets" / "caller_token_owner").read_text().strip()
     except OSError:
         sys.exit("cannot read the owner token under --data-dir")
-    srv = make_server(ApiClient(a.api, token), a.port)
-    print("demo page on http://127.0.0.1:%d/  (every scan calls the real service; Ctrl-C to stop)" % a.port, file=sys.stderr)
+    srv = make_server(ApiClient(a.api, token), a.port, open_urls=a.open_urls)
+    print("demo page on http://127.0.0.1:%d/  (%s; every scan calls the real service; Ctrl-C to stop)" % (a.port, "OPEN: any http(s) URL" if a.open_urls else "sample pages only"), file=sys.stderr)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

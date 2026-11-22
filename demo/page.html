@@ -27,18 +27,40 @@ button:disabled { opacity:.5; cursor:not-allowed; }
 .pass { color:var(--pass); } .hold { color:var(--hold); }
 .match { font-weight:600; }
 details { margin-top:6px; } pre { white-space:pre-wrap; word-break:break-word; font-size:.8rem; background:var(--bg); border:1px solid var(--line); padding:8px; border-radius:6px; max-height:260px; overflow:auto; }
+.try { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin:12px 0; display:flex; flex-direction:column; gap:8px; }
+.try h2 { font-size:1.05rem; margin:0; }
+.row { display:flex; gap:8px; flex-wrap:wrap; }
+input[type=text] { flex:1 1 320px; font:inherit; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); min-width:0; }
+.samples { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+.sample { align-self:stretch; text-align:left; background:var(--bg); color:var(--fg); border:1px solid var(--line); display:flex; flex-wrap:wrap; gap:4px 12px; }
+.sample code, .url code { word-break:break-all; font-size:.85rem; color:var(--accent); }
+.sample span { font-weight:600; }
+.url { margin:0; }
 #status { position:sticky; top:0; background:var(--bg); padding:8px 0; border-bottom:1px solid var(--line); font-weight:600; }
 </style>
 </head>
 <body>
 <main>
   <h1>llm-url-scan: live local demo</h1>
-  <p class="muted">Ten made-up pages served inside a local test network. Press Scan and the real service captures the page in its isolated browser and asks the real model whether it looks like phishing. The answer is advisory only.</p>
+  <p class="muted">Paste a URL, or click a sample. The real service captures the page in its isolated browser and asks the real model whether it looks like phishing. The answer is advisory only.</p>
   <div class="note">
     <p><strong>Every scan calls the real Anthropic API</strong> and costs about USD 0.01 (a little more when the second model also runs). Pages that cannot be read cost nothing.</p>
-    <p>The expected outcome on each card is a design, not a guarantee. Ten made-up pages show nothing about accuracy: a match does not prove the service is good, and a miss does not prove it is bad.</p>
+    <p id="mode-note"></p>
+    <p>The expected outcome on each sample is a design, not a guarantee. A few made-up pages show nothing about accuracy: a match does not prove the service is good, and a miss does not prove it is bad.</p>
   </div>
   <div id="status" role="status" aria-live="polite">Ready. One scan runs at a time.</div>
+  <section class="try" id="try" aria-labelledby="try-h">
+    <h2 id="try-h">Scan a URL</h2>
+    <label for="url" class="muted">Paste a URL</label>
+    <div class="row">
+      <input id="url" type="text" inputmode="url" autocomplete="off" spellcheck="false" maxlength="2048" placeholder="https://example.com/">
+      <button id="go" type="button">Scan URL</button>
+    </div>
+    <p class="muted" id="samples-h">Sample URLs: click one to scan it.</p>
+    <ul class="samples" id="samples"></ul>
+    <div class="res" id="custom-res" aria-live="polite"></div>
+  </section>
+  <h2 id="cards-h">The ten sample pages in detail</h2>
   <ul class="grid" id="grid"></ul>
 </main>
 <script nonce="__NONCE__">
@@ -77,28 +99,60 @@ function show(card, r) {
   if (f.injection_text) bits.push("model flagged hidden instructions");
   if (f.rules && f.rules.length) bits.push("rules: " + f.rules.join(", "));
   box.appendChild(el("p", "muted", bits.join(" | ")));
-  box.appendChild(el("p", "match", r.matched ? "Matches the design." : "Differs from the design (expected " + r.expected.decision + ")."));
+  if (r.expected) box.appendChild(el("p", "match", r.matched ? "Matches the design." : "Differs from the design (expected " + r.expected.decision + ")."));
+  else box.appendChild(el("p", "muted", "No designed outcome for this URL: it is just the service's answer."));
   var d = el("details"); d.appendChild(el("summary", "", "Raw answer"));
   d.appendChild(el("pre", "", JSON.stringify(r.answer, null, 2))); box.appendChild(d);
 }
 
-function scan(p, card) {
-  var box = card.querySelector(".res"); box.textContent = "";
-  setBusy(true, "Scanning “" + p.title + "” … this can take up to a minute.");
-  fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: p.id }) })
+var NOANSWER = {
+  busy: "another scan is running.",
+  not_allowed_in_this_mode: "this demo only scans its own sample pages. Start the server with --open-urls (see demo/README.md) to scan other URLs.",
+  bad_request: "that is not a valid http or https address."
+};
+
+// body: {id: ...} for a card, {url: ...} for the input box or a sample link; holder: the element whose .res shows the answer
+function run(body, label, holder) {
+  var box = holder.querySelector(".res"); box.textContent = "";
+  setBusy(true, "Scanning " + label + " … this can take up to a minute.");
+  fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
     .then(function (resp) { return resp.json().then(function (j) { return { ok: resp.ok, j: j }; }); })
     .then(function (x) {
-      if (x.ok) { show(card, x.j); setBusy(false, "Done: “" + p.title + "” was " + x.j.decision + (x.j.matched ? ", as designed." : ", not as designed.")); }
-      else { box.appendChild(el("p", "hold", "No answer: " + (x.j.error === "busy" ? "another scan is running." : "the service did not give a verdict (" + (x.j.service_code || x.j.error) + ").")));
-             setBusy(false, "The scan did not complete."); }
+      if (x.ok) { show(holder, x.j); setBusy(false, "Done: " + label + " was " + x.j.decision + (x.j.matched === true ? ", as designed." : x.j.matched === false ? ", not as designed." : ".")); }
+      else { box.appendChild(el("p", "hold", "No answer: " + (NOANSWER[x.j.error] || "the service did not give a verdict (" + (x.j.service_code || x.j.error) + ")."))); setBusy(false, "The scan did not complete."); }
     })
     .catch(function () { box.appendChild(el("p", "hold", "No answer: the demo server could not be reached.")); setBusy(false, "The scan did not complete."); });
 }
+function scan(p, card) { run({ id: p.id }, "“" + p.title + "”", card); }
+
+var urlBox = document.getElementById("url"), goBtn = document.getElementById("go"), tryBox = document.getElementById("try");
+function scanUrl(url, label) { urlBox.value = url; run({ url: url }, label, tryBox); }
+buttons.push(goBtn);
+goBtn.addEventListener("click", function () {
+  var u = urlBox.value.trim();
+  if (!u) { statusEl.textContent = "Paste a URL first."; urlBox.focus(); return; }
+  scanUrl(u, "your URL");
+});
+urlBox.addEventListener("keydown", function (e) { if (e.key === "Enter" && !goBtn.disabled) goBtn.click(); });
+
+function addSample(title, url) {
+  var li = el("li"), b = el("button", "sample"); b.type = "button"; b.setAttribute("aria-label", "Scan sample URL: " + title);
+  b.appendChild(el("span", "", title)); b.appendChild(el("code", "", url));
+  b.addEventListener("click", function () { scanUrl(url, "“" + title + "”"); });
+  buttons.push(b); li.appendChild(b); document.getElementById("samples").appendChild(li);
+}
 
 fetch("/api/pages").then(function (r) { return r.json(); }).then(function (j) {
+  document.getElementById("mode-note").textContent = j.open
+    ? "Open mode: any http or https URL you paste is fetched in the isolated browser, and the full address goes to Anthropic and to Google Web Risk. Do not paste an address you would not want to share."
+    : "Sample mode: only the ten made-up pages below can be scanned, inside a local test network. Nothing on the internet is fetched.";
+  if (j.open) document.getElementById("cards-h").hidden = true;
+  j.samples.forEach(function (s) { addSample(s.title, s.url); });
   j.pages.forEach(function (p) {
+    addSample(p.title, p.url);
     var li = el("li", "card"), h = el("h2", "", p.title); h.id = "t-" + p.id;
     li.appendChild(h); li.appendChild(el("p", "muted", p.what));
+    var u = el("p", "url"); u.appendChild(el("code", "", p.url)); li.appendChild(u);
     var e = el("p", "exp"); e.appendChild(el("strong", "", "Designed outcome: ")); e.appendChild(document.createTextNode(p.expected.decision + ". " + p.expected.why));
     li.appendChild(e);
     var b = el("button", "", "Scan"); b.type = "button"; b.setAttribute("aria-label", "Scan: " + p.title);

@@ -43,8 +43,8 @@ class FakeClient:
 def srv():
     made = []
 
-    def start(client):
-        s = demo.make_server(client, 0)
+    def start(client, open_urls=False):
+        s = demo.make_server(client, 0, open_urls=open_urls)
         threading.Thread(target=s.serve_forever, daemon=True).start()
         made.append(s)
         return s, s.server_address[1]
@@ -201,11 +201,48 @@ def test_logs_hold_only_ids_and_status_codes_not_addresses(srv):
     assert "fx.example" not in out and "bank" not in out and "/api/scan 200" in out
 
 
-def test_pages_list_hides_addresses(srv):
+def test_pages_list_shows_only_the_made_up_sample_addresses(srv):
     _, port = srv(FakeClient())
-    body = call(port, "GET", "/api/pages")[2]
-    assert "example" not in body and "http" not in body
-    assert [p["id"] for p in json.loads(body)["pages"]] == [p["id"] for p in demo.PAGES]
+    j = json.loads(call(port, "GET", "/api/pages")[2])
+    assert [p["id"] for p in j["pages"]] == [p["id"] for p in demo.PAGES] and j["open"] is False and j["samples"] == []
+    for p in j["pages"]:
+        assert re.fullmatch(r"http://[a-z.-]+\.example:8080/[a-z0-9]+", p["url"])      # made-up .example names only
+
+
+def test_sample_url_scans_like_its_card(srv):
+    c = FakeClient()
+    _, port = srv(c)
+    j = json.loads(post(port, {"url": "http://fx.example:8080/bank"})[2])
+    assert c.calls == ["http://fx.example:8080/bank"] and j["id"] == "bank" and j["matched"] is True and j["expected"]["decision"] == "hold"
+
+
+@pytest.mark.parametrize("url", ["https://example.com/", "http://fx.example:8080/bank?x=1", "http://fx.example:8080/nope", "http://127.0.0.1/"])
+def test_default_mode_refuses_any_url_that_is_not_a_sample(srv, url):
+    c = FakeClient()
+    _, port = srv(c)
+    st, _, body = post(port, {"url": url})
+    assert st == 400 and json.loads(body) == {"error": "not_allowed_in_this_mode"} and c.calls == []
+
+
+def test_open_mode_scans_any_http_url_without_echoing_it(srv):
+    c = FakeClient()
+    _, port = srv(c, open_urls=True)
+    err = io.StringIO()
+    with redirect_stderr(err):
+        st, _, body = post(port, {"url": "https://shop.test-site.org/path?q=1"})
+        listing = call(port, "GET", "/api/pages")[2]
+    j = json.loads(body)
+    assert st == 200 and c.calls == ["https://shop.test-site.org/path?q=1"]
+    assert j["id"] is None and j["expected"] is None and j["matched"] is None and j["title"] == "Your URL"
+    assert "shop.test-site.org" not in body and "shop.test-site.org" not in err.getvalue()
+    assert json.loads(listing)["pages"] == [] and [s["url"] for s in json.loads(listing)["samples"]] == [s["url"] for s in demo.OPEN_SAMPLES]
+
+
+@pytest.mark.parametrize("url", ["ftp://x.test/", "javascript:alert(1)", "http://", "http://user:pw@x.test/", " http://x.test/", "http://x.test/a b", "http://x.test/\n", "x.test", "h" * 3000, 5, None, ["http://x.test/"]])
+def test_open_mode_still_rejects_malformed_urls(srv, url):
+    c = FakeClient()
+    _, port = srv(c, open_urls=True)
+    assert post(port, {"url": url})[0] == 400 and c.calls == []
 
 
 def test_expectation_match_logic():

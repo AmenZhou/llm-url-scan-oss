@@ -76,7 +76,7 @@ Each secret is a separate file mounted read-only only into the containers that n
 
 ## Demo
 
-`demo/` holds a live local demo page: ten made-up pages, each scanned by the real service with the real judge (about USD 0.01 per scan), shown next to the outcome it was designed for. See `demo/README.md` for the commands. It uses the same `10.80.0.0/16` subnets as the stack tests. It has been built and tested offline only; it has not been run live yet.
+`demo/` holds a live local demo page: an input box for a URL, clickable sample URLs and ten made-up pages, each scanned by the real service with the real judge (about USD 0.01 per scan), shown next to the outcome it was designed for. By default only the made-up pages can be scanned; `--open-urls` accepts real URLs. See `demo/README.md` for the commands. It uses the same `10.80.0.0/16` subnets as the stack tests. It has been run live once, in sample mode; open mode has not.
 
 ## Reading the logs and reports
 
