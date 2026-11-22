@@ -51,6 +51,14 @@ If every scan answers "service_refused / capture_unavailable" (HTTP 503), run `d
 
 Open <http://127.0.0.1:8090/>. Use `--port` to change the demo port and `--api` if you published the service on another port (default `http://127.0.0.1:8800`, set `LLMURL_PUBLISH_PORT` to change it).
 
+## Open the page from a phone (same Wi-Fi)
+
+```
+.venv/bin/python demo/server.py --data-dir "$LLMURL_DATA_DIR" --bind "$(ipconfig getifaddr en0)" --port 8091
+```
+
+(`ipconfig getifaddr en0` is this Mac's Wi-Fi address; use your own command on Linux.) The server prints a link like `http://<address>:8091/?key=<code>`: open it on the phone. The code is random per start, or set it with `--key` (12 characters or more). Opening the link stores the code in a cookie and redirects, so it leaves the address bar; every request without it answers 403. It is plain http on your local network, so use a network you trust. A non-loopback `--bind` cannot be combined with `--open-urls`. If the phone cannot connect: same Wi-Fi? VPN off? Router "client isolation" off? On macOS, allow the "accept incoming connections" prompt for Python.
+
 ## Open mode (real URLs)
 
 Not run live yet. The demo overlay and the smoke overlay point the proxy at the made-up hosts only, so for real URLs start the normal stack and add the flag:

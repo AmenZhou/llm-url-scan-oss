@@ -5,9 +5,10 @@ only the compose test network can reach. With --open-urls any http(s) URL is acc
 Anthropic and Google Web Risk). The server calls the real service API with the owner token read from the data dir. Every scan on this page is a real scan:
 real capture, real judge (a few cents of Anthropic spend). Logs hold ids and status codes only; no address, exception text or page text leaves this process.
 
-  python demo/server.py --data-dir ./data [--port 8090] [--api http://127.0.0.1:8800] [--open-urls]
+  python demo/server.py --data-dir ./data [--port 8090] [--api http://127.0.0.1:8800] [--open-urls | --bind <this machine's Wi-Fi address> [--key CODE]]
 """
 import argparse
+import hmac
 import json
 import secrets
 import sys
@@ -15,9 +16,10 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 HERE = Path(__file__).resolve().parent
 FX = "fx.example"
@@ -108,8 +110,10 @@ class ApiClient:
                 return e.code, {"error": "internal"}
 
 
-def make_server(client, port, page_html=None, open_urls=False):
-    """A ThreadingHTTPServer on 127.0.0.1:port (0 = any). `client` has .scan(url) -> (status, dict). open_urls: accept any http(s) URL."""
+def make_server(client, port, page_html=None, open_urls=False, bind="127.0.0.1", public_host=None, key=None):
+    """A ThreadingHTTPServer on bind:port (0 = any). `client` has .scan(url) -> (status, dict). open_urls: accept any http(s) URL.
+    public_host: an extra Host the server answers to (the address a phone uses). key: when set, every request needs it, first as ?key= on the page
+    address (answered with a cookie and a redirect that drops it from the address bar), then as that cookie."""
     html = page_html if page_html is not None else (HERE / "page.html").read_text(encoding="utf-8")
     busy = threading.Lock()
 
@@ -125,7 +129,27 @@ def make_server(client, port, page_html=None, open_urls=False):
 
         def _allowed_hosts(self):
             p = self.server.server_address[1]
-            return {"127.0.0.1:%d" % p, "localhost:%d" % p}
+            return {"127.0.0.1:%d" % p, "localhost:%d" % p} | ({"%s:%d" % (public_host, p)} if public_host else set())
+
+        def _authed(self):
+            if not key:
+                return True
+            c = SimpleCookie()
+            try:
+                c.load(self.headers.get("Cookie", ""))
+            except Exception:
+                return False
+            return "demo_key" in c and hmac.compare_digest(c["demo_key"].value.encode(), key.encode())
+
+        def _redirect_home(self):
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.send_header("Set-Cookie", "demo_key=%s; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400" % key)
+            self.send_header("Content-Length", "0")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            self._log(302)
 
         def _send(self, code, body, ctype, nonce=None):
             data = body if isinstance(body, bytes) else body.encode()
@@ -165,6 +189,12 @@ def make_server(client, port, page_html=None, open_urls=False):
             if not self._guard(False):
                 return
             path = self.path.split("?")[0]
+            if key:
+                given = parse_qs(urlsplit(self.path).query).get("key", [""])[0]
+                if path == "/" and given and hmac.compare_digest(given.encode(), key.encode()):
+                    return self._redirect_home()
+                if not self._authed():
+                    return self._json(403, {"error": "forbidden"})
             if path == "/":
                 nonce = secrets.token_urlsafe(18)
                 self._send(200, html.replace("__NONCE__", nonce), "text/html; charset=utf-8", nonce)
@@ -176,6 +206,8 @@ def make_server(client, port, page_html=None, open_urls=False):
         def do_POST(self):
             if not self._guard(True):
                 return
+            if not self._authed():
+                return self._json(403, {"error": "forbidden"})
             if self.path.split("?")[0] != "/api/scan":
                 return self._json(404, {"error": "not_found"})
             if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
@@ -220,7 +252,7 @@ def make_server(client, port, page_html=None, open_urls=False):
             finally:
                 busy.release()
 
-    return ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    return ThreadingHTTPServer((bind, port), Handler)
 
 
 def main():
@@ -229,13 +261,23 @@ def main():
     ap.add_argument("--port", type=int, default=8090)
     ap.add_argument("--api", default="http://127.0.0.1:8800", help="the service address (the published port of the compose api)")
     ap.add_argument("--open-urls", action="store_true", help="accept any http(s) URL (run the normal stack, not the demo allowlist; the URL goes to Anthropic and Google Web Risk)")
+    ap.add_argument("--bind", default="127.0.0.1", help="address to listen on. Anything but 127.0.0.1 (for example this machine's Wi-Fi address, so a phone can reach it) needs an access code and cannot be combined with --open-urls")
+    ap.add_argument("--key", help="the access code for a non-loopback --bind (default: a random one, printed in the link)")
     a = ap.parse_args()
+    lan = a.bind not in ("127.0.0.1", "localhost")
+    if lan and a.open_urls:
+        sys.exit("--bind to a network address cannot be combined with --open-urls: real-URL scanning stays on this machine")
+    if a.key is not None and len(a.key) < 12:
+        sys.exit("--key must be at least 12 characters")
+    key = (a.key or secrets.token_urlsafe(12)) if lan else None
     try:
         token = (Path(a.data_dir) / "secrets" / "caller_token_owner").read_text().strip()
     except OSError:
         sys.exit("cannot read the owner token under --data-dir")
-    srv = make_server(ApiClient(a.api, token), a.port, open_urls=a.open_urls)
-    print("demo page on http://127.0.0.1:%d/  (%s; every scan calls the real service; Ctrl-C to stop)" % (a.port, "OPEN: any http(s) URL" if a.open_urls else "sample pages only"), file=sys.stderr)
+    srv = make_server(ApiClient(a.api, token), a.port, open_urls=a.open_urls, bind=a.bind, public_host=a.bind if lan else None, key=key)
+    print("demo page on http://%s:%d/  (%s; every scan calls the real service; Ctrl-C to stop)" % (a.bind, a.port, "OPEN: any http(s) URL" if a.open_urls else "sample pages only"), file=sys.stderr)
+    if lan:
+        print("phone link (same network): http://%s:%d/?key=%s" % (a.bind, a.port, key), file=sys.stderr)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

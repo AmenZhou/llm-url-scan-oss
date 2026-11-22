@@ -43,8 +43,8 @@ class FakeClient:
 def srv():
     made = []
 
-    def start(client, open_urls=False):
-        s = demo.make_server(client, 0, open_urls=open_urls)
+    def start(client, open_urls=False, **kw):
+        s = demo.make_server(client, 0, open_urls=open_urls, **kw)
         threading.Thread(target=s.serve_forever, daemon=True).start()
         made.append(s)
         return s, s.server_address[1]
@@ -250,6 +250,35 @@ def test_expectation_match_logic():
     assert demo.judge_match(bank, "hold") and not demo.judge_match(bank, "pass")
     assert demo.judge_match(ok, "pass") and not demo.judge_match(ok, "hold")
     assert demo.flags_of({"readable": False, "unreadable_reason": "gone", "models_run": []})["injection_text"] is False
+
+
+KEY = "k3y-" + "x" * 20
+
+
+def test_access_code_is_required_for_everything_and_never_logged(srv):
+    c = FakeClient()
+    _, port = srv(c, key=KEY)
+    err = io.StringIO()
+    with redirect_stderr(err):
+        assert call(port, "GET", "/")[0] == 403 and call(port, "GET", "/api/pages")[0] == 403
+        assert post(port, {"id": "ok"})[0] == 403 and c.calls == []
+        assert call(port, "GET", "/?key=wrong")[0] == 403
+        st, h, _ = call(port, "GET", "/?key=" + KEY)
+        assert st == 302 and h["Location"] == "/" and "demo_key=" + KEY in h["Set-Cookie"]
+        assert "HttpOnly" in h["Set-Cookie"] and "SameSite=Strict" in h["Set-Cookie"]
+        cookie = {"Cookie": "demo_key=" + KEY}
+        assert call(port, "GET", "/", headers=cookie)[0] == 200 and call(port, "GET", "/api/pages", headers=cookie)[0] == 200
+        assert post(port, {"id": "ok"}, headers=cookie)[0] == 200 and len(c.calls) == 1
+        assert post(port, {"id": "ok"}, headers={"Cookie": "demo_key=wrong"})[0] == 403 and len(c.calls) == 1
+    assert KEY not in err.getvalue()
+
+
+def test_public_host_is_answered_and_other_hosts_are_not(srv):
+    c = FakeClient()
+    _, port = srv(c, public_host="192.0.2.5")
+    ok = post(port, {"id": "ok"}, host="192.0.2.5:%d" % port, headers={"Origin": "http://192.0.2.5:%d" % port})
+    assert ok[0] == 200
+    assert post(port, {"id": "ok"}, host="192.0.2.6:%d" % port, headers={"Origin": "http://192.0.2.6:%d" % port})[0] == 403
 
 
 def test_every_demo_page_has_an_allowlist_entry_and_a_compose_alias():
