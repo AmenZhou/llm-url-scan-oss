@@ -1,0 +1,143 @@
+import builtins
+import json
+import re
+
+import pytest
+
+from evals import replay as R
+
+PROMPT = R.judge.load_prompt()
+LONG = "Welcome to the made-up page. " * 60       # more than 1,000 characters of text
+FORM = "<form action='/go'><input type=password name=pw></form>"
+MONEY_FORM = "<form action='/pay'><input type=text name=cardnumber placeholder='Card number'><input type=text name=cvv></form>"
+
+
+def page(pid, marker, body=LONG, forms=FORM, label="benign"):
+    html = "<html><head><title>%s</title></head><body><p>%s</p>%s</body></html>" % (marker, body, forms)
+    return {"id": pid, "label": label, "url": "https://example.test/%s" % pid, "html": html}
+
+
+def answer(verdict, rules=()):
+    body = {"verdict": verdict, "rules": list(rules), "brand": None, "quotes": [], "injection_text": False}
+    return {"id": "msg_test", "stop_reason": "end_turn", "usage": {"input_tokens": 1000, "output_tokens": 100}, "content": [{"type": "text", "text": json.dumps(body)}]}
+
+
+class Fake:
+    """Fake client: reply(model, content) -> response dict. Records every call."""
+
+    def __init__(self, reply):
+        self.reply, self.calls, self.messages = reply, [], self
+
+    def create(self, **kw):
+        self.calls.append(kw["model"])
+        return self.reply(kw["model"], kw["messages"][0]["content"])
+
+
+def run(tmp_path, pages, fake, arms, run_cap=50.0, grand_cap=50.0, repeats=1, ledger=None):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    led = ledger or R.Ledger(str(tmp_path / "ledger.jsonl"))
+    n = R.run_arms(pages, arms, fake, led, "R1", run_cap, grand_cap, str(tmp_path / "out"), repeats)
+    lines = {}
+    for a in arms:
+        p = tmp_path / "out" / ("R1-%s.jsonl" % a.name)
+        lines[a.name] = [json.loads(x) for x in open(p)] if p.exists() else []
+    return n, lines, led
+
+
+BASE, MONEY = R.Arm("BASE", PROMPT), R.Arm("MONEY", PROMPT, route_money=True)
+
+
+def test_base_follows_the_service_routing_and_records_every_call(tmp_path):
+    plan = {"page-a": ("benign", None), "page-b": ("phishing", "benign"), "page-c": ("phishing", "phishing"), "page-d": ("cannot_tell", "cannot_tell")}
+
+    def reply(model, content):
+        h, s = plan[re.search(r"title: (page-\w)", content).group(1)]
+        return answer(h, ["R5"] if h == "phishing" else []) if "haiku" in model else answer(s, ["R7"] if s == "cannot_tell" else [])
+    pages = [page(str(k), m) for k, m in enumerate(plan)]
+    n, lines, _ = run(tmp_path, pages, Fake(reply), [BASE])
+    got = [(r["decision"], r["reason"], len(r["calls"])) for r in lines["BASE"]]
+    assert got == [("pass", "pass_haiku", 1), ("pass", "pass_sonnet_overrode_hold", 2), ("hold", "hold_sonnet_verdict", 2), ("hold", "hold_sonnet_cannot_tell", 2)]
+    c = lines["BASE"][2]["calls"][0]
+    assert c["verdict"] == "phishing" and c["rules"] == ["R5"] and c["outcome"] == "HOLD" and c["in"] == 1000 and c["out"] == 100 and c["cost"] > 0
+    assert lines["BASE"][2]["cost"] == pytest.approx(sum(x["cost"] for x in lines["BASE"][2]["calls"]))
+
+
+def test_results_carry_no_url_title_or_text(tmp_path):
+    run(tmp_path, [page("1", "page-zzz-marker")], Fake(lambda m, c: answer("benign")), [BASE])
+    raw = open(tmp_path / "out" / "R1-BASE.jsonl").read()
+    assert "example.test" not in raw and "page-zzz-marker" not in raw and "Welcome" not in raw and "http" not in raw
+    assert set(json.loads(raw)) == {"id", "arm", "repeat", "run", "label", "decision", "judge_decision", "reason", "routed_because", "short", "money", "calls", "cost"}
+
+
+def test_route_money_sends_payment_or_price_pages_to_sonnet_even_when_haiku_passes(tmp_path):
+    pages = [page("pay", "page-pay", forms=MONEY_FORM), page("price", "page-price", body=LONG + " Only $19.99 today"), page("plain", "page-plain")]
+
+    def reply(model, content):
+        return answer("benign") if "haiku" in model else answer("phishing", ["R5"])
+    fake = Fake(reply)
+    _, lines, _ = run(tmp_path, pages, fake, [BASE, MONEY])
+    assert [len(r["calls"]) for r in lines["BASE"]] == [1, 1, 1] and [r["decision"] for r in lines["BASE"]] == ["pass"] * 3
+    assert [len(r["calls"]) for r in lines["MONEY"]] == [2, 2, 1]
+    assert [r["routed_because"] for r in lines["MONEY"]] == ["money", "money", None]
+    assert [(r["decision"], r["reason"]) for r in lines["MONEY"][:2]] == [("hold", "hold_sonnet_verdict")] * 2
+    assert [r["money"] for r in lines["BASE"]] == [True, True, False]
+
+
+def test_route_money_reason_when_sonnet_confirms_pass(tmp_path):
+    _, lines, _ = run(tmp_path, [page("pay", "page-pay", forms=MONEY_FORM)], Fake(lambda m, c: answer("benign")), [MONEY])
+    assert (lines["MONEY"][0]["decision"], lines["MONEY"][0]["reason"]) == ("pass", "pass_sonnet_confirmed_money")
+
+
+def test_ledger_run_and_grand_caps_refuse(tmp_path):
+    fake = Fake(lambda m, c: answer("benign"))
+    one = R.judge.reservation([R.judge.HAIKU], R.judge.INPUT_UPPER)
+    pages = [page(str(i), "page-p%d" % i) for i in range(3)]
+    n, lines, led = run(tmp_path / "ok", pages, fake, [BASE], run_cap=2.5 * one)      # each call settles far below its reservation, so all 3 fit
+    assert n["lines"] == 3
+    seed = tmp_path / "seed.jsonl"
+    seed.write_text(json.dumps({"call": "s", "run": "R0", "reserved": 9.99}) + "\n" + json.dumps({"call": "s", "actual": 9.99}) + "\n")
+    n, lines, _ = run(tmp_path / "grand", pages, fake, [BASE], grand_cap=9.995, ledger=R.Ledger(str(seed)))      # 9.99 already spent by another run
+    assert n["stopped_ledger_grand"] == 1 and "lines" not in n and lines["BASE"] == [] and fake.calls.count(R.judge.HAIKU) == 3
+    n, lines, _ = run(tmp_path / "run", pages, fake, [BASE], run_cap=one / 2)
+    assert n["stopped_ledger_run"] == 1 and lines["BASE"] == [] and fake.calls.count(R.judge.HAIKU) == 3      # refused before any call
+
+
+def test_resume_skips_finished_and_repeats_are_numbered(tmp_path):
+    fake = Fake(lambda m, c: answer("benign"))
+    pages = [page(str(i), "page-p%d" % i) for i in range(2)]
+    n, lines, _ = run(tmp_path, pages, fake, [BASE], repeats=2)
+    assert n["lines"] == 4 and sorted((r["id"], r["repeat"]) for r in lines["BASE"]) == [("0", 0), ("0", 1), ("1", 0), ("1", 1)]
+    n2, lines2, _ = run(tmp_path, pages, fake, [BASE], repeats=3)
+    assert n2["skipped"] == 4 and n2["lines"] == 2 and len(lines2["BASE"]) == 6
+
+
+def test_credit_failure_halts(tmp_path):
+    class Boom(Exception):
+        status_code = 402
+
+    def reply(model, content):
+        raise Boom("credit balance low")
+    n, lines, _ = run(tmp_path, [page("1", "page-a"), page("2", "page-b")], Fake(reply), [BASE])
+    assert n["stopped_credit"] == 1 and lines["BASE"] == []
+
+
+def test_run_never_reads_the_key(tmp_path, monkeypatch):
+    opened = []
+    real = builtins.open
+    monkeypatch.setattr(builtins, "open", lambda f, *a, **k: (opened.append(str(f)), real(f, *a, **k))[1])
+    monkeypatch.setattr(R.keys, "read_env_value", lambda *a, **k: (_ for _ in ()).throw(AssertionError("key read")))
+    run(tmp_path, [page("1", "page-a")], Fake(lambda m, c: answer("benign")), [BASE])
+    assert not any("secrets" in x or x.endswith(".env") for x in opened)
+
+
+def test_load_pages_and_parse_arm(tmp_path):
+    (tmp_path / "pages").mkdir()
+    for i in ("b", "a"):
+        (tmp_path / "pages" / (i + ".json")).write_text(json.dumps({"url": "https://example.test/", "html": "<p>x</p>", "label": "benign"}))
+    ids = tmp_path / "ids.txt"
+    ids.write_text("b\na\n")
+    assert [p["id"] for p in R.load_pages(str(tmp_path / "pages"), str(ids))] == ["a", "b"]
+    pf = tmp_path / "p.md"
+    pf.write_text("system prompt")
+    a = R.parse_arm("X=%s+money" % pf)
+    assert (a.name, a.prompt, a.route_money) == ("X", "system prompt", True) and R.parse_arm("Y=%s" % pf).route_money is False
