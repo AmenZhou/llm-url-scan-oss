@@ -102,6 +102,15 @@ def test_ledger_run_and_grand_caps_refuse(tmp_path):
     assert n["stopped_ledger_run"] == 1 and lines["BASE"] == [] and fake.calls.count(R.judge.HAIKU) == 3      # refused before any call
 
 
+def test_two_ledgers_on_one_file_see_each_others_spend(tmp_path):
+    path = str(tmp_path / "ledger.jsonl")
+    first, second = R.Ledger(path), R.Ledger(path)      # two replay processes opened the same ledger
+    first.reserve("R1", 6.0, run_cap=10, grand_cap=10)
+    with pytest.raises(R.Refused, match="grand"):
+        second.reserve("R2", 6.0, run_cap=10, grand_cap=10)      # 6 + 6 would pass the grand cap of 10
+    assert second.spent() == 6.0 and R.Ledger(path).spent() == 6.0      # the refusal wrote nothing
+
+
 def test_resume_skips_finished_and_repeats_are_numbered(tmp_path):
     fake = Fake(lambda m, c: answer("benign"))
     pages = [page(str(i), "page-p%d" % i) for i in range(2)]

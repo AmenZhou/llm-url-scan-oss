@@ -11,6 +11,7 @@ Page files: DIR/<id>.json with url, html and label (the dataset URL label). ids 
 """
 import argparse
 import collections
+import fcntl
 import json
 import os
 import re
@@ -42,15 +43,21 @@ class Arm:
 
 
 class Ledger:
-    """Append-only jsonl. A call has a `reserve` line (run, reserved) and later a settle line (actual); an unsettled call counts at its reservation."""
+    """Append-only jsonl. A call has a `reserve` line (run, reserved) and later a settle line (actual); an unsettled call counts at its reservation.
+    Every write re-reads the file under an exclusive lock, so replays that share one ledger see each other's spend before reserving."""
 
     def __init__(self, path):
         self.path, self.calls = path, {}
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        self._apply(json.loads(line))
+                self._reload(f)
+
+    def _reload(self, f):
+        f.seek(0)
+        self.calls = {}
+        for line in f:
+            if line.strip():
+                self._apply(json.loads(line))
 
     def _apply(self, r):
         c = self.calls.setdefault(r["call"], {"run": r.get("run"), "cost": 0.0})
@@ -62,23 +69,30 @@ class Ledger:
     def spent(self, run=None):
         return round(sum(c["cost"] for c in self.calls.values() if run is None or c["run"] == run), 6)
 
-    def _append(self, r):
-        with open(self.path, "a", encoding="utf-8") as f:
+    def _locked_append(self, make):
+        """Lock, re-read, let `make()` check the totals and build the line (or raise), append it. -> the line."""
+        with open(self.path, "a+", encoding="utf-8") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)      # released when the file closes
+            self._reload(f)
+            r = make()
             f.write(json.dumps(r, sort_keys=True) + "\n")
-        self._apply(r)
+            f.flush()
+            self._apply(r)
+        return r
 
     def reserve(self, run, amount, run_cap, grand_cap):
         """Refuse when this run's total plus the reservation would pass `run_cap`, or the total over all runs would pass `grand_cap`."""
-        if self.spent(run) + amount > run_cap + 1e-9:
-            raise Refused("run")
-        if self.spent() + amount > grand_cap + 1e-9:
-            raise Refused("grand")
-        call = "%d-%d" % (time.time_ns(), len(self.calls))
-        self._append({"call": call, "run": run, "reserved": round(amount, 6), "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
-        return call
+        def make():
+            if self.spent(run) + amount > run_cap + 1e-9:
+                raise Refused("run")
+            if self.spent() + amount > grand_cap + 1e-9:
+                raise Refused("grand")
+            return {"call": "%d-%d" % (time.time_ns(), len(self.calls)), "run": run, "reserved": round(amount, 6),
+                    "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        return self._locked_append(make)["call"]
 
     def settle(self, call, actual):
-        self._append({"call": call, "actual": round(actual, 6)})
+        self._locked_append(lambda: {"call": call, "actual": round(actual, 6)})
 
 
 def page_sections(rec):

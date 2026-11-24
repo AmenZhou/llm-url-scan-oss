@@ -107,6 +107,35 @@ def test_report_lines_counts_only_ranges_strata_and_needs_sort():
     assert "http" not in text
 
 
+def test_api_failures_counted_and_cannot_tell_resolutions_not_called_confirms():
+    by, reps, labels = build(n_benign=4, base_fh=0, cand_fh=0, named_n=0, base_named=0, cand_named=0)
+    by["CAND"]["b0"]["calls"] = [{"outcome": "CANNOT_TELL"}, {"outcome": "PASS"}]      # Haiku could not tell, Sonnet decided
+    by["CAND"]["b1"]["calls"] = [{"outcome": "PASS"}, {"outcome": "PASS"}]             # a real confirmation
+    by["CAND"]["b2"]["calls"] = [{"outcome": "ERROR"}, {"outcome": "ERROR"}]           # both calls failed
+    lines = []
+    SC.analyse(by, reps, labels, {}, [("CAND", "BASE")], "a", lines.append)
+    assert "set STAGE CAND benign sonnet confirm=1 overturn=0 (hold_to_pass=0 pass_to_hold=0) cannot_tell=1 decided_after_haiku_cannot=1" in lines
+    assert "set API_FAILED CAND pages_with_a_failed_call=1" in lines and "set API_FAILED BASE pages_with_a_failed_call=0" in lines
+
+
+def test_label_join_accepts_short_ids_and_refuses_missing_labels():
+    full = "a" * 64
+    by = {"BASE": {full: row(full, "benign", "pass"), "x" * 64: row("x" * 64, "benign", "pass")}}
+    with pytest.raises(SystemExit, match="1 of 2 result ids have no label"):
+        SC.join_labels(by, {full[:16]: {"url_label": "benign"}})
+    del by["BASE"]["x" * 64]
+    assert SC.join_labels(by, {full[:16]: {"url_label": "benign"}}) == {full: {"url_label": "benign"}}
+
+
+def test_rule_c_without_named_kinds_is_refused(tmp_path, monkeypatch, capsys):
+    p = tmp_path / "r.jsonl"
+    p.write_text('{"id": "b0", "label": "benign", "decision": "pass", "cost": 1.0}\n')
+    monkeypatch.setattr("sys.argv", ["score", "--results", "BASE=%s" % p, "--results", "CAND=%s" % p, "--rule", "c"])
+    with pytest.raises(SystemExit):
+        SC.main()
+    assert "--rule c needs --named-kinds" in capsys.readouterr().err
+
+
 def test_flips_between_repeats():
     by, reps, labels = build(n_benign=4, base_fh=0, cand_fh=0, named_n=0, base_named=0, cand_named=0)
     reps["BASE"]["b0"].append(dict(row("b0", "benign", "hold"), repeat=1))

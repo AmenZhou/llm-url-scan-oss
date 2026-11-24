@@ -68,6 +68,17 @@ def load_arms(specs):
     return by, reps
 
 
+def join_labels(by, labels):
+    """Labels keyed by every result id; a label file may use the 16-character id prefix. Exits when any result id has no label,
+    because a silent drop would score a subset (e.g. only the held good pages) as if it were the whole set."""
+    ids = set().union(*(set(v) for v in by.values()))
+    out = {i: labels.get(i) or labels.get(i[:16]) for i in ids}
+    missing = sum(v is None for v in out.values())
+    if missing:
+        sys.exit("LABEL JOIN: %d of %d result ids have no label" % (missing, len(ids)))
+    return out
+
+
 def labels_from_results(by):
     base = next(iter(by.values()))
     return {i: {"url_label": r["label"]} for i, r in base.items()}
@@ -147,8 +158,12 @@ def analyse(by, reps, labels, strata, pairs, rule, out, tag="set", guard_points=
             out("%s STAGE %s %s haiku_hold=%d haiku_pass=%d haiku_cannot=%d sent_to_sonnet=%d n=%d routed %s" % (
                 tag, arm, name, hs["HOLD"], hs["PASS"], hs["CANNOT"], len(sent), len(rows),
                 " ".join("%s=%d" % kv for kv in sorted(collections.Counter(r.get("routed_because") for r in sent).items(), key=str))))
-            out("%s STAGE %s %s sonnet confirm=%d overturn=%d (hold_to_pass=%d pass_to_hold=%d) cannot_tell=%d" % (
-                tag, arm, name, len(sent) - ss["CANNOT"] - hold_pass - pass_hold, hold_pass + pass_hold, hold_pass, pass_hold, ss["CANNOT"]))
+            # decided = Haiku could not tell and Sonnet did: a resolution, not a confirmation
+            decided = sum(state(r["calls"][0]) == "CANNOT" and state(r["calls"][1]) != "CANNOT" for r in sent)
+            out("%s STAGE %s %s sonnet confirm=%d overturn=%d (hold_to_pass=%d pass_to_hold=%d) cannot_tell=%d decided_after_haiku_cannot=%d" % (
+                tag, arm, name, len(sent) - ss["CANNOT"] - hold_pass - pass_hold - decided, hold_pass + pass_hold, hold_pass, pass_hold, ss["CANNOT"], decided))
+        failed = sum(any(c.get("outcome") == "ERROR" for c in by[arm][i].get("calls", [])) for i in ids)
+        out("%s API_FAILED %s pages_with_a_failed_call=%d" % (tag, arm, failed))
         for name, pool in (("benign", benign), ("phish", phish)):
             fx = collections.Counter()
             for i in pool:
@@ -224,8 +239,10 @@ def main():
     ap.add_argument("--tag", default="set")
     ap.add_argument("--out")
     a = ap.parse_args()
+    if a.rule == "c" and not a.named_kinds:
+        ap.error("--rule c needs --named-kinds (the carry rule's main measure)")
     by, reps = load_arms(dict(s.split("=", 1) for s in a.results))
-    labels = {r["id"]: r for r in read_jsonl(a.labels)} if a.labels else labels_from_results(by)
+    labels = join_labels(by, {r["id"]: r for r in read_jsonl(a.labels)}) if a.labels else labels_from_results(by)
     strata = {r["id"]: r["status"] for r in read_jsonl(a.strata)} if a.strata else {}
     arms = list(by)
     pairs = [tuple(p.split(":")) for p in a.pairs.split(",")] if a.pairs else [(x, arms[0]) for x in arms[1:]]
