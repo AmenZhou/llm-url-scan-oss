@@ -79,10 +79,13 @@ def replay(rows, meta, hist, rules=("known_site", "tiebreak"), mode="time", exce
         m = meta.get(r["id"])
         new = dict(r, judge_decision=r.get("judge_decision", r["decision"]), history=mode)
         if m:
-            dom = domain_of(m["url"])
+            host = host_of(m["url"])[0]
+            dom = registrable(host)
             st = hist.status(dom, day(m.get("date")), mode)
             strata[r["id"]] = st
-            if "known_site" in rules and st == "phish_only" and r["decision"] == "pass" and dom not in exceptions:
+            # an exception may be a registrable domain (github.io) or a host below one (sites.google.com)
+            shared = dom in exceptions or any(host == e or host.endswith("." + e) for e in exceptions)
+            if "known_site" in rules and st == "phish_only" and r["decision"] == "pass" and not shared:
                 new.update(decision="hold", rule="known_site")
             elif "tiebreak" in rules and st == "benign_only" and r.get("reason") == "hold_sonnet_cannot_tell":
                 new.update(decision="pass", rule="tiebreak")

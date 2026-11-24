@@ -51,6 +51,14 @@ def test_known_site_skips_mixed_unknown_held_and_shared_hosts():
     assert run(rows, m, exceptions=set())[0]["shared"]["decision"] == "hold"      # without the exception list the shared host is caught
 
 
+def test_shared_host_exception_below_a_registrable_domain():
+    # "sites.google.com" is a host, not a registrable domain: pages under it must still be skipped
+    hist = RR.History([("https://x.sites.google.com/p", "phish", "2020-01-01")])
+    m = meta(site=("https://y.sites.google.com/q", "2021-01-01"), plain=("https://google.com/q", "2021-01-01"))
+    out, _ = RR.replay([row("site", "pass"), row("plain", "pass")], m, hist, rules=("known_site",), exceptions={"sites.google.com"})
+    assert out[0]["decision"] == "pass" and out[1]["decision"] == "hold"
+
+
 def test_tiebreak_passes_cannot_tell_on_clean_history_only():
     m = meta(clean=("https://goodsite.test/q", "2021-01-01"), young=("https://goodsite.test/q", "2020-01-01"), bad=("https://badsite.test/q", "2021-01-01"))
     rows = [row(i, "hold", "hold_sonnet_cannot_tell") for i in m]
