@@ -152,6 +152,41 @@ def test_rule_effects_from_rules_replay_rows():
     assert "set RULE CAND known_site benign added_holds=1 removed_holds=0" in lines
 
 
+def test_three_outcomes_stopped_vs_hold_only_and_could_not_scan_counts():
+    by, reps, labels = build(n_benign=10, base_fh=1, cand_fh=2, named_n=0, base_named=0, cand_named=0)      # BASE holds b0; CAND holds b0, b1
+    for i in ("b2", "b3", "b4"):      # CAND answers could-not-scan on three pages BASE passed
+        by["CAND"][i]["decision"] = "could_not_scan"
+    for k in range(30):      # 30 whole-service phishing pages BASE passes, CAND stops: 10 as hold, 20 as could-not-scan
+        by["BASE"]["u%d" % k]["decision"] = "pass"
+        by["CAND"]["u%d" % k]["decision"] = "hold" if k < 10 else "could_not_scan"
+    lines = []
+    SC.analyse(by, reps, labels, {}, [("CAND", "BASE")], "a", lines.append)
+    text = "\n".join(lines)
+    assert "set FALSE HOLD CAND pooled 2/10" in text and "set GOOD STOPPED CAND (hold or could_not_scan) 5/10" in text      # hold only / stopped
+    assert "set CATCH CAND 80/100" in text and "set CATCH STOPPED CAND (hold or could_not_scan) 100/100" in text
+    assert "set COULD NOT SCAN CAND total=23 group=good:3 group=urlset:20" in text and "set COULD NOT SCAN BASE total=0" in text
+    assert "set GOOD BASELINE-PASSED NOW COULD_NOT_SCAN CAND vs BASE: 3 of 9" in text
+    mc = [x for x in lines if "PAIRED CAND vs BASE CATCH STOPPED" in x][0]
+    assert "only_CAND=30 only_BASE=0" in mc and "p_holm=0.0000" in mc      # McNemar on "stopped"
+    assert [x for x in lines if "PAIRED CAND vs BASE CATCH both" in x][0].count("only_CAND=10") == 1      # the hold-only test is unchanged
+
+
+def test_two_outcome_results_print_no_three_outcome_lines():
+    by, reps, labels = build(n_benign=4, base_fh=0, cand_fh=1, named_n=0, base_named=0, cand_named=0)
+    lines = []
+    SC.analyse(by, reps, labels, {}, [("CAND", "BASE")], "a", lines.append)
+    assert not [x for x in lines if "STOPPED" in x or "COULD NOT SCAN" in x]
+
+
+def test_could_not_scan_rows_without_model_calls_do_not_break_the_stage_lines():
+    by, reps, labels = build(n_benign=3, base_fh=0, cand_fh=0, named_n=0, base_named=0, cand_named=0)
+    by["CAND"]["b0"].update(decision="could_not_scan", calls=[])
+    by["CAND"]["b1"]["calls"] = [{"outcome": "PASS"}]
+    lines = []
+    SC.analyse(by, reps, labels, {}, [("CAND", "BASE")], "a", lines.append)
+    assert "set STAGE CAND benign haiku_hold=0 haiku_pass=1 haiku_cannot=0 sent_to_sonnet=0 n=1 routed " in lines
+
+
 # ---------------------------------------------------------------- recompute of the November L summary from the saved results
 @pytest.mark.skipif(not os.path.exists(PREREG_DIR + "/L-RAG.jsonl"), reason="saved L results not present")
 def test_recompute_reproduces_L_summary():

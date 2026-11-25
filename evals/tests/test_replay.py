@@ -150,3 +150,35 @@ def test_load_pages_and_parse_arm(tmp_path):
     pf.write_text("system prompt")
     a = R.parse_arm("X=%s+money" % pf)
     assert (a.name, a.prompt, a.route_money) == ("X", "system prompt", True) and R.parse_arm("Y=%s" % pf).route_money is False
+
+
+# ---------------------------------------------------------------- the changed decision: detector and shop routing
+CHANGED, OLD = R.Arm("CHANGED", PROMPT), R.Arm("OLD", PROMPT, legacy=True)
+ERROR_PAGE = "<html><head><title>404 Not Found</title></head><body><p>The page you asked for is gone.</p></body></html>"
+SHOP = "<html><head><title>page-shop</title></head><body><p>%s Price $19.99. Add to cart now.</p></body></html>" % LONG
+
+
+def test_changed_arm_answers_could_not_scan_before_any_model_call_and_old_arm_still_asks_the_models(tmp_path):
+    fake = Fake(lambda m, c: answer("benign"))
+    _, lines, led = run(tmp_path, [{"id": "e", "label": "benign", "url": "https://example.test/e", "html": ERROR_PAGE}], fake, [CHANGED, OLD])
+    c, o = lines["CHANGED"][0], lines["OLD"][0]
+    assert (c["decision"], c["reason"], c["calls"], c["cost"]) == ("could_not_scan", "page_error", [], 0.0)
+    assert o["decision"] == "pass" and len(o["calls"]) >= 1      # unchanged service: the models see the error page
+    assert fake.calls.count(R.judge.HAIKU) == 1 and led.spent() > 0      # only the OLD arm spent
+
+
+def test_changed_arm_sends_a_haiku_passed_shop_page_to_sonnet_old_arm_does_not(tmp_path):
+    def reply(model, content):
+        return answer("benign") if "haiku" in model else answer("phishing", ["R5"])
+    _, lines, _ = run(tmp_path, [{"id": "s", "label": "phishing", "url": "https://example.test/s", "html": SHOP}], Fake(reply), [CHANGED, OLD])
+    c, o = lines["CHANGED"][0], lines["OLD"][0]
+    assert (c["decision"], c["routed_because"], len(c["calls"])) == ("hold", "shop_page", 2)
+    assert (o["decision"], o["routed_because"], len(o["calls"])) == ("pass", None, 1)
+
+
+def test_parse_arm_flags(tmp_path):
+    pf = tmp_path / "p.md"
+    pf.write_text("x")
+    a = R.parse_arm("X=%s+money+legacy" % pf)
+    assert (a.route_money, a.legacy) == (True, True)
+    assert (R.parse_arm("Y=%s+legacy" % pf).legacy, R.parse_arm("Z=%s" % pf).legacy) == (True, False)

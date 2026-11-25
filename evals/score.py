@@ -88,6 +88,11 @@ def held(r):
     return r["decision"] == "hold"
 
 
+def stopped(r):
+    """The ad does not run: a hold, or a could-not-scan answer (callers that know only hold/pass treat anything but pass as a stop)."""
+    return r["decision"] in ("hold", "could_not_scan")
+
+
 def rate(k, n):
     lo, hi = wilson(k, n)
     return "%d/%d = %.1f%% wilson95 [%.1f, %.1f]" % (k, n, 100 * k / max(1, n), 100 * lo, 100 * hi)
@@ -145,9 +150,21 @@ def analyse(by, reps, labels, strata, pairs, rule, out, tag="set", guard_points=
         for i in ns:
             out("NEEDS_SORT_ID %s %s" % (arm, i))
 
+    three = any(r["decision"] == "could_not_scan" for a in by for r in by[a].values())      # three outcomes only when some arm has could-not-scan
+    first = next(iter(by))
+    if three:
+        for arm in by:
+            out("%s GOOD STOPPED %s (hold or could_not_scan) %s" % (tag, arm, rate(sum(stopped(by[arm][i]) for i in benign), len(benign))))
+            out("%s CATCH STOPPED %s (hold or could_not_scan) %s" % (tag, arm, rate(sum(stopped(by[arm][i]) for i in whole), len(whole))))
+            cns = collections.Counter((grp(i) or ("good" if lab(i) == "benign" else "phish")) for i in ids if by[arm][i]["decision"] == "could_not_scan")
+            out("%s COULD NOT SCAN %s total=%d %s" % (tag, arm, sum(cns.values()), " ".join("group=%s:%d" % kv for kv in sorted(cns.items()))))
+            if arm != first:
+                moved = sum(by[first][i]["decision"] == "pass" and by[arm][i]["decision"] == "could_not_scan" for i in benign)
+                out("%s GOOD BASELINE-PASSED NOW COULD_NOT_SCAN %s vs %s: %d of %d" % (tag, arm, first, moved, sum(by[first][i]["decision"] == "pass" for i in benign)))
+
     for arm in by:      # stages (needs the per-call records of replay.py)
         for name, pool in (("benign", benign), ("phish", phish)):
-            rows = [by[arm][i] for i in pool if "calls" in by[arm][i]]
+            rows = [by[arm][i] for i in pool if by[arm][i].get("calls")]      # a could-not-scan answer has no model call
             if not rows:
                 continue
             hs = collections.Counter(state(r["calls"][0]) for r in rows)
@@ -173,10 +190,10 @@ def analyse(by, reps, labels, strata, pairs, rule, out, tag="set", guard_points=
             for rule_name in sorted({k[0] for k in fx}):
                 out("%s RULE %s %s %s added_holds=%d removed_holds=%d" % (tag, arm, rule_name, name, fx[(rule_name, "added")], fx[(rule_name, "removed")]))
 
-    def table(x, y, pool):
+    def table(x, y, pool, f=held):
         a = b = c = d = 0
         for i in pool:
-            hx, hy = held(by[x][i]), held(by[y][i])
+            hx, hy = f(by[x][i]), f(by[y][i])
             a, b, c, d = a + (hx and hy), b + (hx and not hy), c + (hy and not hx), d + (not hx and not hy)
         return a, b, c, d
 
@@ -186,9 +203,17 @@ def analyse(by, reps, labels, strata, pairs, rule, out, tag="set", guard_points=
     adj = lambda tabs: dict(zip(pairs, holm([mcnemar_exact(t[1], t[2]) for t in (tabs[p] for p in pairs)])))      # noqa: E731
     fh_adj, ca_adj, nm_adj = adj(fh_t), adj(ca_t), adj(nm_t)
     ci = lambda t: paired_interval(*t) if sum(t) else (0.0, 0.0, 0.0)      # noqa: E731
+    if three:      # the same paired tests on "stopped": catch (the pass rule's measure) and good pages stopped
+        for meas, pool in (("CATCH STOPPED", whole), ("GOOD STOPPED", benign)):
+            tabs = {p: table(*p, pool, stopped) for p in pairs}
+            for p, pa in zip(pairs, holm([mcnemar_exact(tabs[q][1], tabs[q][2]) for q in pairs])):
+                t = tabs[p]
+                if sum(t):
+                    c = ci(t)
+                    out("%s PAIRED %s vs %s %s both=%d only_%s=%d only_%s=%d neither=%d p_raw=%.4f p_holm=%.4f diff=%+.1f pts newcombe95=[%+.1f, %+.1f]" % (
+                        tag, p[0], p[1], meas, t[0], p[0], t[1], p[1], t[2], t[3], mcnemar_exact(t[1], t[2]), pa, 100 * c[0], 100 * c[1], 100 * c[2]))
     cost = {a: sum(by[a][i]["cost"] for i in ids) for a in by}
     n = max(1, len(ids))
-    first = next(iter(by))
     for a in by:
         out("COST %s total=%.4f per_1000=%.2f ratio_to_%s=%.3f" % (a, cost[a], 1000 * cost[a] / n, first, cost[a] / cost[first] if cost[first] else float("nan")))
     res = {}

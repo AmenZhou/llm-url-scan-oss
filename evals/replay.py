@@ -22,6 +22,11 @@ from llm_url_scan import decide as D
 from llm_url_scan import judge, keys
 from llm_url_scan import pagetext as PT
 
+try:      # the unchanged build (7dcf766) has no page-fact rules: replayed from there it is the old routing, nothing else
+    from llm_url_scan import pagefacts as PF
+except ImportError:
+    PF = None
+
 KEY_FILE = "/Users/haimengzhou/apps/secrets/anthropic-llm-url-scan.env"
 KEY_VAR = "LLMURL_ANTHROPIC_API_KEY"
 MAX_ERROR_RUN = 6      # this many final API errors in a row halt the run
@@ -38,8 +43,10 @@ class Halt(Exception):
 
 
 class Arm:
-    def __init__(self, name, prompt, route_money=False):
-        self.name, self.prompt, self.route_money = name, prompt, route_money
+    """`legacy` = the unchanged service's decision (no could-not-scan detector, no shop routing); otherwise the changed one when the build has it."""
+
+    def __init__(self, name, prompt, route_money=False, legacy=False):
+        self.name, self.prompt, self.route_money, self.legacy = name, prompt, route_money, legacy
 
 
 class Ledger:
@@ -95,12 +102,16 @@ class Ledger:
         self._locked_append(lambda: {"call": call, "actual": round(actual, 6)})
 
 
-def page_sections(rec):
-    """Saved HTML -> the five sections as the model gets them (final address = page address, status 200, no redirects)."""
+def raw_sections(rec):
+    """Saved HTML -> the sections the capture hands the service (final address = page address, status 200, no redirects)."""
     html = rec["html"]
     scan = PT.scan_page(html)
-    page = PT.build_page(rec["url"], rec["url"], 200, 0, scan["title"], PT.html_to_text(html), scan, PT.extract_buttons(html), None)
-    return judge.model_sections(rec["url"], page["sections"])
+    return PT.build_page(rec["url"], rec["url"], 200, 0, scan["title"], PT.html_to_text(html), scan, PT.extract_buttons(html), None)["sections"]
+
+
+def page_sections(rec):
+    """The sections as the model gets them."""
+    return judge.model_sections(rec["url"], raw_sections(rec))
 
 
 def money_signal(sections):
@@ -127,9 +138,17 @@ def summary(rec):
 
 def judge_page(rec, arm, client, ledger, run, run_cap, grand_cap, repeat, state):
     """One page, one arm: Haiku, then Sonnet by the service's routing (plus `route_money` when the arm asks), then the service's decision."""
-    sections = page_sections(rec)
+    raw = raw_sections(rec)
+    sections = judge.model_sections(rec["url"], raw)
     msg, info, quote_page = judge.build_message(sections)
     money = money_signal(sections)
+    changed = PF is not None and not arm.legacy
+    why = PF.could_not_scan_reason(raw) if changed else None      # the service's own detector, before any model call
+    if why:
+        return {"id": rec["id"], "arm": arm.name, "repeat": repeat, "run": run, "label": rec.get("label"), "decision": "could_not_scan",
+                "judge_decision": "could_not_scan", "reason": why, "routed_because": None, "short": info["text_chars"] <= D.SHORT_CHARS, "money": money,
+                "calls": [], "cost": 0.0}
+    shop = bool(changed and PF.shop_signal(raw))
 
     def call(model):
         amount = judge.reservation([model], judge.input_bound(arm.prompt, msg))      # (1 + 1 retry) x the per-call worst case
@@ -145,12 +164,12 @@ def judge_page(rec, arm, client, ledger, run, run_cap, grand_cap, repeat, state)
 
     h = call(judge.HAIKU)
     short = info["text_chars"] <= D.SHORT_CHARS
-    route = D.routed_because(h, short)
+    route = D.routed_because(h, short, shop) if shop else D.routed_because(h, short)
     money_route = route is None and arm.route_money and money
     if money_route:
         route = "money"
     s = call(judge.SONNET) if route else None
-    d = D.decide(h, s, short or money_route)      # a money page is handled like a short page that Haiku passed
+    d = D.decide(h, s, short or money_route, shop) if shop else D.decide(h, s, short or money_route)      # a money page is handled like a short page that Haiku passed
     reason = d["reason"].replace("_short", "_money") if money_route else d["reason"]
     recs = [r for r in (h, s) if r]
     return {"id": rec["id"], "arm": arm.name, "repeat": repeat, "run": run, "label": rec.get("label"), "decision": d["decision"],
@@ -189,11 +208,14 @@ def run_arms(pages, arms, client, ledger, run, run_cap, grand_cap, out_dir, repe
 
 
 def parse_arm(spec):
-    """NAME=prompt_file or NAME=prompt_file+money."""
+    """NAME=prompt_file, optionally followed by +money and/or +legacy (the unchanged decision)."""
     name, _, rest = spec.partition("=")
-    money = rest.endswith("+money")
-    with open(rest[:-6] if money else rest, encoding="utf-8") as f:
-        return Arm(name, f.read(), money)
+    flags = set()
+    while rest.endswith(("+money", "+legacy")):
+        rest, _, flag = rest.rpartition("+")
+        flags.add(flag)
+    with open(rest, encoding="utf-8") as f:
+        return Arm(name, f.read(), "money" in flags, "legacy" in flags)
 
 
 def main():
