@@ -36,7 +36,7 @@ code { word-break:break-all; font-size:.84rem; color:var(--accent); }
 .res p { margin:0; }
 .verdict { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
 .badge { display:inline-block; font-weight:800; font-size:1.05rem; padding:1px 14px; border-radius:99px; border:2px solid currentColor; }
-.pass { color:var(--pass); } .hold { color:var(--hold); }
+.pass { color:var(--pass); } .hold, .could_not_scan { color:var(--hold); }
 .verdict-note { padding:6px 10px; border-radius:6px; font-weight:600; }
 .verdict-note.yes { background:var(--ok); color:var(--pass); }
 .verdict-note.no { background:var(--bad); color:var(--hold); }
@@ -80,7 +80,12 @@ var REASONS = {
   unreadable_gone: "The page is gone (not found), so nothing could be judged.",
   unreadable_site_blocked: "The site blocked the browser, so nothing could be judged.",
   unreadable_proxy_refused: "The egress proxy refused the address.",
-  unreadable_other: "The page did not answer in time, so nothing could be judged."
+  unreadable_other: "The page did not answer in time, so nothing could be judged.",
+  page_empty: "The page shows nothing to judge, so no model ran.",
+  page_error: "The page is an error page, so no model ran.",
+  page_bot_wall: "The page is a bot wall, so no model ran.",
+  page_parked: "The page is a parked or suspended site, so no model ran.",
+  pass_sonnet_confirmed_shop: "A shop page: the second model looked and agreed."
 };
 var RULES = {
   R1: "asks for a password, card number, code or other credential",

@@ -99,10 +99,14 @@ def build(events, year, week):
     say("[d1a]")
     tally("d1a decision", scans, "decision")
     tally("d1a holds reason", holds, "reason")
-    say("d1a holds excluding unreadable", len(holds) - len(unread))
+    model_holds = [s for s in holds if not s["reason"].startswith("unreadable_")]      # old logs hold unreadable pages; new ones answer could_not_scan
+    cns = [s for s in scans if s["decision"] == "could_not_scan"]
+    say("d1a holds excluding unreadable", len(model_holds))
+    say("could_not_scan", len(cns))
+    tally("could_not_scan reason", cns, "reason")
     say("hold_sonnet_failed api_error outage", sum(s["reason"] == "hold_sonnet_failed" and s.get("s_reason") == "api_error" for s in scans))
-    say("hold_rate with unreadable", _pct(len(holds), len(scans)))
-    say("hold_rate without unreadable", _pct(len(holds) - len(unread), len(readable)))
+    say("hold_rate with unreadable", _pct(len(holds), len(scans)))      # hold only: could_not_scan is counted apart
+    say("hold_rate without unreadable", _pct(len(model_holds), len(readable)))
 
     say("[web_risk]")
     tally("web_risk d0", scans, "wr_d0")
@@ -141,7 +145,7 @@ def build(events, year, week):
     say("d1a pass truncated", sum(s["decision"] == "pass" and s.get("truncated") is True for s in scans))
 
     say("[recheck6]")
-    first = [s for s in scans if s["reason"].startswith("unreadable_") or s["reason"] == "hold_sonnet_cannot_tell"]
+    first = [s for s in scans if s["decision"] == "could_not_scan" or s["reason"].startswith("unreadable_") or s["reason"] == "hold_sonnet_cannot_tell"]
     done = [r6[key(s)] for s in first if key(s) in r6 and not r6[key(s)]["r6_skipped"]]
     say("recheck6 rechecked", len(done), "skipped", sum(key(s) in r6 and r6[key(s)]["r6_skipped"] for s in first),
         "pending", sum(key(s) not in r6 for s in first))

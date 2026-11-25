@@ -9,6 +9,7 @@ from .capture import CaptureUnavailable
 from .decide import SHORT_CHARS, decide, routed_because, state_of
 from .judge import (HAIKU, INPUT_UPPER, PROMPT_SHA, SONNET, build_message, call_model, input_bound, model_sections, reservation)
 from .ledger import SpendCap
+from .pagefacts import could_not_scan_reason, shop_signal
 from .patterns import P05, P12, P13, P15
 from .store import hid_of
 from .urlcheck import validate_url
@@ -46,7 +47,9 @@ def _view(rec):
 
 
 class Service:
-    def __init__(self, *, client, webrisk, capture, ledger, log, store, salt, salt_ver, prompt, clock=lambda: datetime.now(timezone.utc), sleep=time.sleep):
+    def __init__(self, *, client, webrisk, capture, ledger, log, store, salt, salt_ver, prompt, could_not_scan=True, shop_routing=True,
+                 clock=lambda: datetime.now(timezone.utc), sleep=time.sleep):
+        self.could_not_scan, self.shop_routing = could_not_scan, shop_routing
         self.client, self.webrisk, self.capture, self.ledger, self.log, self.store = client, webrisk, capture, ledger, log, store
         self.salt, self.salt_ver, self.prompt, self.clock, self.sleep = salt, salt_ver, prompt, clock, sleep
         self._sem, self._waiting, self._hits, self._first_call, self.served = asyncio.Semaphore(CAPTURE_SLOTS), 0, {}, True, 0
@@ -98,11 +101,15 @@ class Service:
         return rec
 
     async def _judge(self, url, cap, rid):
-        """-> dict with h, s, d (decision), info, cost. An unreadable page is held and no model runs."""
+        """-> dict with h, s, d (decision), info, cost. An unreadable page or a page with nothing to judge is could_not_scan and no model runs."""
+        stop = "could_not_scan" if self.could_not_scan else "hold"
         if not cap["readable"]:
             return {"h": None, "s": None, "info": None, "cost": 0.0,
-                    "d": {"decision": "hold", "reason": "unreadable_" + cap["unreadable_reason"], "d1a_state": "UNREAD", "routed_because": None}}
+                    "d": {"decision": stop, "reason": "unreadable_" + cap["unreadable_reason"], "d1a_state": "UNREAD", "routed_because": None}}
         msg, info, quote_page = build_message(model_sections(url, cap["sections"]))
+        why = could_not_scan_reason(cap["sections"]) if self.could_not_scan else None
+        if why:      # read, but nothing to judge: no model runs, and the answer is never a pass
+            return {"h": None, "s": None, "info": info, "cost": 0.0, "d": {"decision": "could_not_scan", "reason": why, "d1a_state": "UNREAD", "routed_because": None}}
         bound = input_bound(self.prompt, msg)
         if bound > INPUT_UPPER:
             try:
@@ -112,8 +119,9 @@ class Service:
                 raise Refusal("spend_cap", 503) from None
         h = await self._model(HAIKU, msg, quote_page, info["empty_page"])
         short = info["text_chars"] <= SHORT_CHARS
-        s = await self._model(SONNET, msg, quote_page, info["empty_page"]) if routed_because(h, short) else None
-        return {"h": h, "s": s, "info": info, "d": decide(h, s, short), "cost": round(h["cost_usd"] + (s["cost_usd"] if s else 0.0), 6)}
+        shop = self.shop_routing and shop_signal(cap["sections"])
+        s = await self._model(SONNET, msg, quote_page, info["empty_page"]) if routed_because(h, short, shop) else None
+        return {"h": h, "s": s, "info": info, "d": decide(h, s, short, shop), "cost": round(h["cost_usd"] + (s["cost_usd"] if s else 0.0), 6)}
 
     def _record(self, res):
         """Rolling statistics for the breakers; logs a breaker event for each one opened."""
@@ -160,7 +168,7 @@ class Service:
                        wr_d0=wr, wr_d0_date=now.strftime("%Y-%m-%d"), cost_usd=res["cost"], latency_ms=latency_ms, prompt_sha256=PROMPT_SHA,
                        service_version=__version__, **flags, **_mfields("h_", h), **_mfields("s_", s))
         try:      # the address waits, sealed, for the day-7 and the 6 h recheck
-            self.store.insert(hid, self.salt_ver, url, now, r6=d["reason"].startswith("unreadable_") or d["reason"] == "hold_sonnet_cannot_tell")
+            self.store.insert(hid, self.salt_ver, url, now, r6=d["decision"] == "could_not_scan" or d["reason"].startswith("unreadable_") or d["reason"] == "hold_sonnet_cannot_tell")
         except Exception:
             self.store_errors += 1
         self.served += 1

@@ -107,3 +107,17 @@ def test_cli_report(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("LLMURL_DATA_DIR", str(tmp_path))
     assert cli.main(["report", "--week", "%d-W%02d" % (YEAR, WEEK)]) == 0
     assert "calls answered 50" in capsys.readouterr().out
+
+
+def test_could_not_scan_is_counted_apart_from_holds_and_enters_the_recheck_population(tmp_path):
+    log = LogWriter(tmp_path, clock=lambda: T)
+    base = dict(salt_ver=1, caller="owner", wr_d0_date="2026-11-03", wr_d0="negative", cost_usd=0)
+    log.write("scan", hid=hid(0), decision="could_not_scan", reason="page_empty", readable=True, d1a_state="UNREAD", **base)
+    log.write("scan", hid=hid(1), decision="could_not_scan", reason="unreadable_gone", readable=False, unreadable_reason="gone", d1a_state="UNREAD", **base)
+    log.write("scan", hid=hid(2), decision="hold", reason="hold_sonnet_verdict", readable=True, d1a_state="HOLD", h_state="HOLD", s_state="HOLD", **base)
+    log.write("recheck6", hid=hid(0), salt_ver=1, r6_skipped=False, r6_readable=True, r6_d1a_state="UNREAD", r6_cost_usd=0)
+    assert log.rejected == 0
+    out = report.build(report.load(tmp_path), YEAR, WEEK)
+    for line in ("could_not_scan 2", "could_not_scan reason page_empty 1", "d1a holds excluding unreadable 1", "d1a decision hold 1",
+                 "recheck6 rechecked 1 skipped 0 pending 1"):
+        assert line in out.splitlines()

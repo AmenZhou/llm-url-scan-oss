@@ -1,17 +1,17 @@
 # llm-url-scan
 
-A small HTTP service that takes one URL, opens the page in an isolated browser, asks an LLM whether it looks like phishing, and answers `pass` or `hold` with a reason code. It also logs the Google Web Risk verdict for the same URL (on day 0 and again on day 7) so you can measure the judge against an independent signal.
+A small HTTP service that takes one URL, opens the page in an isolated browser, asks an LLM whether it looks like phishing, and answers `pass`, `hold` or `could_not_scan` with a reason code. It also logs the Google Web Risk verdict for the same URL (on day 0 and again on day 7) so you can measure the judge against an independent signal.
 
-**Advisory only.** The answer blocks nothing, and the response says `"advisory": true`. Before any caller enforces the answer, a `pass` that carries the `truncated` or `injection_text` flag should be turned into a `hold` (a rule you add at that time, with tests).
+**Advisory only.** The answer blocks nothing, and the response says `"advisory": true`. **Callers: only `pass` lets an ad through; `hold` and `could_not_scan` both stop it.** A caller that tests `decision == "hold"` would let a `could_not_scan` page through, so test `decision != "pass"` instead. Known readers of `decision` in this repo: `llm_url_scan/report.py` (updated: counts `could_not_scan` apart from holds), `evals/score.py` (still counts only `hold` as stopped; to be changed with the replay harness) and `evals/replay.py` (has its own copy of the routing and does not run the page-fact rules yet). Before any caller enforces the answer, a `pass` that carries the `truncated` or `injection_text` flag should be turned into a `hold` (a rule you add at that time, with tests).
 
 ## How a scan works
 
 1. **Capture.** A Playwright Chromium worker, in a container with the browser sandbox on and every Linux capability dropped, loads the URL. Its only way out is a deny-by-default **egress proxy** that refuses loopback, private, link-local, metadata and carrier-grade-NAT addresses, internal names, and names that *resolve* to such addresses.
 2. **Page text.** The worker turns the page into a small, capped text form: title, visible text, forms (fields, actions), buttons, redirect hops and a page state (`ok`, `parked`, `bot-wall`, `http-404`, `dns`, ...).
-3. **Judge (rule "D1a").** D1a is the routing rule: Haiku judges every readable page; Sonnet re-judges when Haiku holds, cannot tell, fails, or passes a page of 1,000 characters or fewer; unreadable pages are held. A Sonnet cannot-tell or failure is a hold. The prompt is `llm_url_scan/prompts/prompt-v3.md`; the service refuses to start if its hash changes.
-4. **Unreadable pages are held.** If the page cannot be read (blocked, gone, refused by the proxy, timed out), the answer is `hold`, no model runs, and the reason says why.
+3. **Judge (rule "D1a").** D1a is the routing rule: Haiku judges every readable page; Sonnet re-judges when Haiku holds, cannot tell, fails, or passes a page of 1,000 characters or fewer, or passes a page whose text shows a price amount and a cart phrase (`add to cart`, `buy now`, `checkout`, `free shipping`; route `shop_page`, setting `LLMURL_SHOP_ROUTING`, default on). A Sonnet cannot-tell or failure is a hold. The prompt is `llm_url_scan/prompts/prompt-v3.md`; the service refuses to start if its hash changes.
+4. **Pages that cannot be scanned.** If the page cannot be read (blocked, gone, refused by the proxy, timed out; reasons `unreadable_*`), or it was read but shows nothing to judge (reasons `page_empty`, `page_error`, `page_bot_wall`, `page_parked`, found by the pure rules in `llm_url_scan/pagefacts.py` before any model runs), the answer is `could_not_scan`, no model runs, and the reason says why. It stops the ad like a hold, but it is not a verdict on the page and it is never a `pass`. Setting `LLMURL_COULD_NOT_SCAN=0` restores the old behaviour (unreadable pages are `hold`, no page-fact rules).
 5. **Web Risk, logged only.** The URL is checked against Google Web Risk on day 0 and day 7. It never changes the answer.
-6. **Recheck.** Pages held as unreadable or as Sonnet cannot-tell get one more capture and judgement about six hours later. It is logged only; the first answer stands.
+6. **Recheck.** Every `could_not_scan` page and every page held as Sonnet cannot-tell gets one more capture and judgement about six hours later. It is logged only; the first answer stands. So a caller that gets `could_not_scan` must re-submit the URL later (at least six hours) to get a new answer.
 
 The model sees the scheme, host and path plus the *length* of the query string, never the query itself. Web Risk receives the full address.
 
@@ -80,7 +80,7 @@ Each secret is a separate file mounted read-only only into the containers that n
 
 ## Reading the logs and reports
 
-False holds are an upper bound: nobody labels pages, so a hold that Web Risk does not list is *unconfirmed*, not false. Web Risk positive means the address is listed; negative does not mean safe. Agreement with Web Risk is consistent, not independent. Unreadable pages are held by policy and counted apart. The weekly report prints no percentage for a group under 30 pages.
+False holds are an upper bound: nobody labels pages, so a hold that Web Risk does not list is *unconfirmed*, not false. Web Risk positive means the address is listed; negative does not mean safe. Agreement with Web Risk is consistent, not independent. `could_not_scan` pages are counted apart from holds. The weekly report prints no percentage for a group under 30 pages.
 
 ## Known gaps
 

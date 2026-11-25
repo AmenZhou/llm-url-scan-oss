@@ -8,25 +8,26 @@ def state_of(rec):
     return {"PASS": "PASS", "HOLD": "HOLD"}.get(rec["outcome"], "CANNOT")
 
 
-def routed_because(h, short):
-    """Why Sonnet runs, or None. D1a: Sonnet when Haiku holds, cannot decide, or passes with at most 1,000 characters of text."""
+def routed_because(h, short, shop=False):
+    """Why Sonnet runs, or None. D1a: Sonnet when Haiku holds, cannot decide, or passes with at most 1,000 characters of text,
+    or passes a page that shows a price and a cart phrase (shop: the caller's pagefacts.shop_signal)."""
     st = state_of(h)
     if st == "HOLD":
         return "h_hold"
     if st == "CANNOT":
         return "h_failed" if h["outcome"] in ("FAILED", "ERROR") else "h_cannot"
-    return "short_pass" if short else None
+    return "short_pass" if short else "shop_page" if shop else None
 
 
-def decide(h, s, short):
-    """h, s: model records (s None when not routed); short: text_chars <= 1000. -> {decision, reason, d1a_state, routed_because}.
-    An unreadable page is held by the caller before any model runs."""
-    route = routed_because(h, short)
+def decide(h, s, short, shop=False):
+    """h, s: model records (s None when not routed); short: text_chars <= 1000; shop: price + cart phrase. -> {decision, reason, d1a_state, routed_because}.
+    An unreadable or could-not-scan page is answered by the caller before any model runs."""
+    route = routed_because(h, short, shop)
     if route is None:
         return {"decision": "pass", "reason": "pass_haiku", "d1a_state": "PASS", "routed_because": None}
     st = state_of(s)
     if st == "PASS":
-        reason = {"short_pass": "pass_sonnet_confirmed_short", "h_hold": "pass_sonnet_overrode_hold"}.get(route, "pass_sonnet_resolved")
+        reason = {"short_pass": "pass_sonnet_confirmed_short", "h_hold": "pass_sonnet_overrode_hold", "shop_page": "pass_sonnet_confirmed_shop"}.get(route, "pass_sonnet_resolved")
         return {"decision": "pass", "reason": reason, "d1a_state": "PASS", "routed_because": route}
     if st == "HOLD":
         return {"decision": "hold", "reason": "hold_sonnet_verdict", "d1a_state": "HOLD", "routed_because": route}

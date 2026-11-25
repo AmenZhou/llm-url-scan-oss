@@ -36,7 +36,7 @@ def build_service(cfg, client=None, webrisk=None, capture=None, **kw):
     client = client or build_client(read_env_value(cfg.anthropic_key_file, cfg.anthropic_key_var))
     webrisk = webrisk or WebRisk(read_env_value(cfg.webrisk_key_file, WR_KEY_VAR), allow=lambda: ledger.wr_allow(cfg.webrisk_daily_ceiling))
     svc = Service(client=client, webrisk=webrisk, capture=capture or make_client(cfg), ledger=ledger, log=LogWriter(d), store=RecheckStore(d / "recheck.sqlite", public=load_public_key(d)),
-                  salt=salt, salt_ver=salt_ver, prompt=load_prompt(), **kw)
+                  salt=salt, salt_ver=salt_ver, prompt=load_prompt(), could_not_scan=cfg.could_not_scan, shop_routing=cfg.shop_routing, **kw)
     return svc
 
 
