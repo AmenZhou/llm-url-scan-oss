@@ -5,6 +5,8 @@ Environment (all optional)
   LLMURL_EVAL_TARGET      worktree whose `llm_url_scan` is judged: the changed build (default: this one) or the unchanged one (the baseline worktree)
   LLMURL_EVAL_KEY_FILE    key file; LLMURL_EVAL_LEDGER the shared ledger; LLMURL_EVAL_RUN_CAP (USD, default 1.50) and LLMURL_EVAL_GRAND_CAP the caps
   LLMURL_EVAL_OUT         optional jsonl: one line per case (ids, expected, decisions, reasons, cost; no page text)
+  LLMURL_EVAL_PROMPT      optional path to a prompt file the arm uses instead of the service's pinned prompt (judge.load_prompt());
+                          test only, e.g. LLMURL_EVAL_PROMPT=llm_url_scan/prompts/prompt-v5.md. The service itself always loads prompt-v3.
 Prints counts and ids only. Existence of the key file is checked here; it is read only when the first case runs.
 """
 import collections
@@ -26,6 +28,7 @@ LEDGER = os.environ.get("LLMURL_EVAL_LEDGER", "/Users/haimengzhou/apps/ai-consol
 RUN_CAP = float(os.environ.get("LLMURL_EVAL_RUN_CAP", "1.50"))
 GRAND_CAP = float(os.environ.get("LLMURL_EVAL_GRAND_CAP", "16.32"))
 OUT = os.environ.get("LLMURL_EVAL_OUT")
+PROMPT_FILE = os.environ.get("LLMURL_EVAL_PROMPT")
 RUN = "eval-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
 REPEATS = 2
 RESULTS = []      # one dict per finished case, for the summary
@@ -35,11 +38,21 @@ def skip_reason():
     """Why the suite cannot run, or None."""
     if TARGET and not os.path.isdir(TARGET):
         return "LLMURL_EVAL_TARGET is not a folder"
+    if PROMPT_FILE and not os.path.isfile(PROMPT_FILE):
+        return "LLMURL_EVAL_PROMPT is not a file"
     if not os.path.isfile(os.path.join(CASES_DIR, "cases.jsonl")):
         return "case file cases.jsonl not found in LLMURL_EVAL_CASES_DIR"
     if not os.path.isfile(KEY_FILE):
         return "API key file not found (LLMURL_EVAL_KEY_FILE)"
     return None
+
+
+def eval_prompt(judge):
+    """The arm's system prompt: LLMURL_EVAL_PROMPT's file when set, else the service's pinned prompt."""
+    if PROMPT_FILE:
+        with open(PROMPT_FILE, encoding="utf-8") as f:
+            return f.read()
+    return judge.load_prompt()
 
 
 @pytest.fixture(scope="session")
@@ -53,7 +66,7 @@ def ctx():
     from llm_url_scan import judge, keys
     if TARGET:      # the build under test must be the one that loaded
         assert os.path.realpath(judge.__file__).startswith(os.path.realpath(TARGET)), "llm_url_scan was not loaded from LLMURL_EVAL_TARGET"
-    return {"arm": R.Arm("EVAL", judge.load_prompt()), "client": judge.build_client(keys.read_env_value(KEY_FILE, R.KEY_VAR)),
+    return {"arm": R.Arm("EVAL", eval_prompt(judge)), "client": judge.build_client(keys.read_env_value(KEY_FILE, R.KEY_VAR)),
             "ledger": R.Ledger(LEDGER), "state": {"err_run": 0}}
 
 

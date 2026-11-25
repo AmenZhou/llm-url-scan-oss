@@ -40,3 +40,23 @@ def test_case_fails_when_the_ledger_run_cap_refuses(ctx, tmp_path, monkeypatch):
     with pytest.raises(pytest.fail.Exception, match="ledger refused"):
         K.test_expected_outcome_on_both_runs(case(tmp_path, "hold"), ctx)
     assert ctx["client"].calls == []      # refused before any call
+
+
+def test_eval_prompt_reads_the_file_named_by_the_env_var_else_the_pinned_prompt(monkeypatch):
+    from llm_url_scan import judge
+    monkeypatch.setattr(C, "PROMPT_FILE", None)
+    assert C.eval_prompt(judge) == judge.load_prompt()
+    v5 = judge.PROMPT_PATH.with_name("prompt-v5.md")
+    monkeypatch.setattr(C, "PROMPT_FILE", str(v5))
+    assert C.eval_prompt(judge) == v5.read_text(encoding="utf-8") != judge.load_prompt()
+
+
+def test_prompt_v5_keeps_v3_rule_codes_and_answer_format_so_the_parser_accepts_it():
+    from llm_url_scan import judge
+    v3 = judge.load_prompt().splitlines()
+    v5 = judge.PROMPT_PATH.with_name("prompt-v5.md").read_text(encoding="utf-8").splitlines()
+    changed = [i for i, (a, b) in enumerate(zip(v3, v5)) if a != b]
+    assert len(v3) == len(v5) and len(changed) == 1 and v5[changed[0]].startswith(v3[changed[0]])      # one clause appended to one rule
+    assert [l[:3] for l in v5 if l[:1] == "R" and l[1:2].isdigit()] == ["R%d " % i for i in range(1, 10)]
+    sample = 'x {"verdict": "suspicious", "rules": ["R2"], "brand": "B", "quotes": ["q"], "injection_text": false} y'
+    assert judge.parse_answer(sample) == {"verdict": "suspicious", "rules": ["R2"], "brand": "B", "quotes": ["q"], "injection_text": False}
