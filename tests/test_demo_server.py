@@ -229,12 +229,12 @@ def test_open_mode_scans_any_http_url_without_echoing_it(srv):
     _, port = srv(c, open_urls=True)
     err = io.StringIO()
     with redirect_stderr(err):
-        st, _, body = post(port, {"url": "https://shop.test-site.org/path?q=1"})
+        st, _, body = post(port, {"url": "https://shop.test-site.example/path?q=1"})
         listing = call(port, "GET", "/api/pages")[2]
     j = json.loads(body)
-    assert st == 200 and c.calls == ["https://shop.test-site.org/path?q=1"]
+    assert st == 200 and c.calls == ["https://shop.test-site.example/path?q=1"]
     assert j["id"] is None and j["expected"] is None and j["matched"] is None and j["title"] == "Your URL"
-    assert "shop.test-site.org" not in body and "shop.test-site.org" not in err.getvalue()
+    assert "shop.test-site.example" not in body and "shop.test-site.example" not in err.getvalue()
     assert json.loads(listing)["pages"] == [] and [s["url"] for s in json.loads(listing)["samples"]] == [s["url"] for s in demo.OPEN_SAMPLES]
 
 

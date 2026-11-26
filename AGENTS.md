@@ -16,12 +16,12 @@ It scans what the push would add (added lines and commit messages) and prints on
 
 | Kind | Means | Fix |
 |---|---|---|
-| `unlisted_host` | a web address whose host is not a reserved test name (`*.example`, `*.test`, `*.invalid`, `example.com`, `localhost`) or on the script's short allow list | use a reserved test name; if the real host is needed and harmless (a public API), end the line with `leak-ok` |
+| `unlisted_host` | a web address whose host is not a reserved test name (`*.example`, `*.test`, `*.invalid`, `example.com`, `localhost`) or on the script's short allow list | use a reserved test name; if the real host is needed and harmless (a public API), add a comment `leak-ok: <reason>` on that line |
 | `home_path` | a path into someone's home folder | read it from an environment variable or a relative path |
 | `api_key`, `private_key` | a key or token | remove it, rewrite the commit, and rotate the key |
 | `private_word` | a word from `LEAK_CHECK_PRIVATE_WORDS` (a comma list you set locally, e.g. names of datasets whose results are not public; kept out of the repo on purpose) | remove it |
 
-Exit 0 means clean. Exit 1 means findings: fix them, or confirm each one is harmless and mark it `leak-ok`. Never
+Exit 0 means clean. Exit 1 means findings: fix them, or confirm each one is harmless and mark it `leak-ok: <reason>`. Never
 publish with an unexplained finding. The script cannot see everything, so also make sure that:
 
 - no real address, host, page title or page text from a scanned page, test set or log is in the code, tests, docs or

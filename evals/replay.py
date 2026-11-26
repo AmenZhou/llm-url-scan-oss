@@ -27,7 +27,7 @@ try:      # the unchanged build (7dcf766) has no page-fact rules: replayed from 
 except ImportError:
     PF = None
 
-KEY_FILE = "/Users/haimengzhou/apps/secrets/anthropic-llm-url-scan.env"
+KEY_FILE = os.environ.get("LLMURL_EVAL_KEY_FILE", "secrets/anthropic.env")      # same file the service quick start creates
 KEY_VAR = "LLMURL_ANTHROPIC_API_KEY"
 MAX_ERROR_RUN = 6      # this many final API errors in a row halt the run
 MONEY_FORM = re.compile(r"card|cvv|cvc|expir|payment|checkout|billing|credit", re.I)

@@ -7,7 +7,7 @@ HIST = RR.History([
     ("https://goodsite.test/b", "benign", "2022-06-01"),
     ("https://mixed.test/a", "phish", "2020-01-01"),
     ("https://mixed.test/b", "benign", "2020-01-02"),
-    ("https://alice.github.io/p", "phish", "2020-01-01"),
+    ("https://alice.github.io/p", "phish", "2020-01-01"),      # leak-ok: a shared-hosting suffix is what is tested
 ])
 
 
@@ -25,7 +25,7 @@ def run(rows, m, **kw):
 
 
 def test_domain_helpers():
-    assert RR.domain_of("https://a.b.badsite.test/x") == "badsite.test" and RR.domain_of("https://x.co.uk/p") == "x.co.uk"
+    assert RR.domain_of("https://a.b.badsite.test/x") == "badsite.test" and RR.domain_of("https://x.co.uk/p") == "x.co.uk"      # leak-ok: public suffix
     assert RR.domain_of("noscheme.test/p") == "noscheme.test"
 
 
@@ -43,7 +43,7 @@ def test_known_site_is_time_ordered_by_default():
 
 def test_known_site_skips_mixed_unknown_held_and_shared_hosts():
     m = meta(mixed=("https://mixed.test/q", "2021-01-01"), unknown=("https://nothing.test/q", "2021-01-01"), held=("https://badsite.test/q", "2021-01-01"),
-             shared=("https://bob.github.io/q", "2021-01-01"))
+             shared=("https://bob.github.io/q", "2021-01-01"))      # leak-ok: shared-hosting suffix
     rows = [row("mixed", "pass"), row("unknown", "pass"), row("held", "hold", "hold_sonnet_verdict"), row("shared", "pass")]
     out, strata = run(rows, m)
     assert [out[i]["decision"] for i in ("mixed", "unknown", "held", "shared")] == ["pass", "pass", "hold", "pass"] and strata["mixed"] == "mixed"
@@ -53,8 +53,8 @@ def test_known_site_skips_mixed_unknown_held_and_shared_hosts():
 
 def test_shared_host_exception_below_a_registrable_domain():
     # "sites.google.com" is a host, not a registrable domain: pages under it must still be skipped
-    hist = RR.History([("https://x.sites.google.com/p", "phish", "2020-01-01")])
-    m = meta(site=("https://y.sites.google.com/q", "2021-01-01"), plain=("https://google.com/q", "2021-01-01"))
+    hist = RR.History([("https://x.sites.google.com/p", "phish", "2020-01-01")])      # leak-ok: shared-hosting host
+    m = meta(site=("https://y.sites.google.com/q", "2021-01-01"), plain=("https://google.com/q", "2021-01-01"))      # leak-ok
     out, _ = RR.replay([row("site", "pass"), row("plain", "pass")], m, hist, rules=("known_site",), exceptions={"sites.google.com"})
     assert out[0]["decision"] == "pass" and out[1]["decision"] == "hold"
 

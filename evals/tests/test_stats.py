@@ -6,7 +6,7 @@ import pytest
 
 from evals import stats as S
 
-ORIGINAL = "/Users/haimengzhou/apps/ai-console/tmp/rag1-scripts/analyze_rag.py"
+ORIGINAL = os.environ.get("LLMURL_EVAL_ORIGINAL_STATS", "")      # the original analysis script, outside git; test skips without it
 
 
 def test_mcnemar_exact_hand_values():

@@ -5,7 +5,7 @@ Flags: web addresses whose host is not a reserved test name or on ALLOWED_HOSTS,
 strings, private key blocks, and the words in LEAK_CHECK_PRIVATE_WORDS (comma list, e.g. names of datasets whose
 results stay private; kept out of this public file on purpose). Prints place and kind only, never
 the matching text, so the output itself is safe to share. Exit 0 clean, 1 findings, 2 git error.
-Accept a reviewed line by ending it with the marker `leak-ok`.
+Accept a reviewed line by putting the marker `leak-ok` on it, best with a short reason (`# leak-ok: public API`).
 """
 import os
 import re
@@ -37,7 +37,7 @@ def host_ok(host):
 
 def findings(text):
     """Kinds of leak found in one line of text."""
-    if text.rstrip().endswith("leak-ok"):
+    if "leak-ok" in text:
         return []
     out = [kind for kind, rx in CHECKS if rx.search(text)]
     if any(w in text.lower() for w in private_words()):

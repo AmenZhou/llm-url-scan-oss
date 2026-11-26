@@ -22,9 +22,9 @@ if TARGET and os.path.isdir(TARGET):
 
 from evals import replay as R  # noqa: E402
 
-CASES_DIR = os.environ.get("LLMURL_EVAL_CASES_DIR", "/Users/haimengzhou/apps/ai-console/tmp/known-failures/eval-cases/")
+CASES_DIR = os.environ.get("LLMURL_EVAL_CASES_DIR", "")
 KEY_FILE = os.environ.get("LLMURL_EVAL_KEY_FILE", R.KEY_FILE)
-LEDGER = os.environ.get("LLMURL_EVAL_LEDGER", "/Users/haimengzhou/apps/ai-console/tmp/evals/ledger.jsonl")
+LEDGER = os.environ.get("LLMURL_EVAL_LEDGER", "")      # required: one shared ledger keeps the grand cap true across runs
 RUN_CAP = float(os.environ.get("LLMURL_EVAL_RUN_CAP", "1.50"))
 GRAND_CAP = float(os.environ.get("LLMURL_EVAL_GRAND_CAP", "16.32"))
 OUT = os.environ.get("LLMURL_EVAL_OUT")
@@ -40,8 +40,10 @@ def skip_reason():
         return "LLMURL_EVAL_TARGET is not a folder"
     if PROMPT_FILE and not os.path.isfile(PROMPT_FILE):
         return "LLMURL_EVAL_PROMPT is not a file"
-    if not os.path.isfile(os.path.join(CASES_DIR, "cases.jsonl")):
+    if not CASES_DIR or not os.path.isfile(os.path.join(CASES_DIR, "cases.jsonl")):
         return "case file cases.jsonl not found in LLMURL_EVAL_CASES_DIR"
+    if not LEDGER:
+        return "LLMURL_EVAL_LEDGER not set"
     if not os.path.isfile(KEY_FILE):
         return "API key file not found (LLMURL_EVAL_KEY_FILE)"
     return None

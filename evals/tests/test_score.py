@@ -5,7 +5,7 @@ import pytest
 
 from evals import score as SC
 
-PREREG_DIR = "/Users/haimengzhou/apps/ai-console/tmp/rag1/results"
+PREREG_DIR = os.environ.get("LLMURL_EVAL_PREREG_DIR", "")      # saved results of an earlier run, outside git; test skips without them
 NAMED = ("fake_shop",)
 
 
