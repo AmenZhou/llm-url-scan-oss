@@ -63,7 +63,7 @@ def text(tmp_path):
     "haiku alone unconfirmed holds 11", "haiku alone misses pass web_risk positive 2",
     "caller owner unconfirmed holds 6 of 45 readable 13.3% upper bound not a false-positive rate",
     "unreadable_holds 5 web_risk d0 positive 0 web_risk d7 positive 0",
-    "p05 3 holds 3", "p15 thin 10 holds 10",
+    "p05 3 holds 3 could_not_scan 0", "p15 thin 10 holds 10 could_not_scan 0",
     "d1a pass injection 1", "d1a pass truncated 1", "sonnet PASS injection 1",
     "recheck6 rechecked 1 skipped 1 pending 3", "recheck6 became readable 1", "recheck6 pass 1 hold 0",
     "cost spend_usd 0.1386", "cost per_1000_readable_usd 3.0667", "cost spend_cap_refusals 1",
@@ -112,12 +112,15 @@ def test_cli_report(tmp_path, monkeypatch, capsys):
 def test_could_not_scan_is_counted_apart_from_holds_and_enters_the_recheck_population(tmp_path):
     log = LogWriter(tmp_path, clock=lambda: T)
     base = dict(salt_ver=1, caller="owner", wr_d0_date="2026-11-03", wr_d0="negative", cost_usd=0)
-    log.write("scan", hid=hid(0), decision="could_not_scan", reason="page_empty", readable=True, d1a_state="UNREAD", **base)
+    log.write("scan", hid=hid(0), decision="could_not_scan", reason="page_empty", readable=True, d1a_state="UNREAD", p15="under40", **base)
     log.write("scan", hid=hid(1), decision="could_not_scan", reason="unreadable_gone", readable=False, unreadable_reason="gone", d1a_state="UNREAD", **base)
     log.write("scan", hid=hid(2), decision="hold", reason="hold_sonnet_verdict", readable=True, d1a_state="HOLD", h_state="HOLD", s_state="HOLD", **base)
     log.write("recheck6", hid=hid(0), salt_ver=1, r6_skipped=False, r6_readable=True, r6_d1a_state="UNREAD", r6_cost_usd=0)
     assert log.rejected == 0
     out = report.build(report.load(tmp_path), YEAR, WEEK)
     for line in ("could_not_scan 2", "could_not_scan reason page_empty 1", "d1a holds excluding unreadable 1", "d1a decision hold 1",
-                 "recheck6 rechecked 1 skipped 0 pending 1"):
+                 "recheck6 rechecked 1 skipped 0 pending 1",
+                 # the readable could_not_scan page is neither a hold nor a pass: out of the hold rate, overlaps and per-caller denominator
+                 "d1a unconfirmed holds 1", "haiku alone unconfirmed holds 1", "caller owner unconfirmed holds 1 of 1 readable n/a upper bound not a false-positive rate",
+                 "p15 under40 1 holds 0 could_not_scan 1"):
         assert line in out.splitlines()
