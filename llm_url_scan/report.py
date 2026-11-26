@@ -154,7 +154,7 @@ def build(events, year, week):
         "pending", sum(key(s) not in r6 for s in first))
     say("recheck6 became readable", sum(r.get("r6_readable") is True for r in done))
     say("recheck6 became decidable", sum(r.get("r6_d1a_state") in ("PASS", "HOLD") for r in done))
-    say("recheck6 pass", sum(r.get("r6_d1a_state") == "PASS" for r in done), "hold", sum(r.get("r6_d1a_state") == "HOLD" for r in done),
+    say("recheck6 pass", sum(r.get("r6_d1a_state") == "PASS" for r in done), "hold", sum(r.get("r6_d1a_state") in ("HOLD", "CANNOT") for r in done),      # CANNOT: Sonnet still cannot tell or failed, a hold
         "still not scannable", sum(r.get("r6_d1a_state") == "UNREAD" for r in done))
 
     say("[cost]")

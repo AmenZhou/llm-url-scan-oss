@@ -127,3 +127,13 @@ def test_could_not_scan_is_counted_apart_from_holds_and_enters_the_recheck_popul
                  "recheck6 pass 0 hold 0 still not scannable 1", "cost per_1000_readable_usd 0.5000", "cost sonnet_share_readable n/a",
                  "p15 under40 1 holds 0 could_not_scan 1"):
         assert line in out.splitlines()
+
+
+def test_a_recheck_where_sonnet_still_cannot_tell_counts_as_a_hold(tmp_path):
+    log = LogWriter(tmp_path, clock=lambda: T)
+    log.write("scan", hid=hid(0), decision="hold", reason="hold_sonnet_cannot_tell", readable=True, d1a_state="CANNOT", h_state="HOLD", s_state="CANNOT",
+              salt_ver=1, caller="owner", wr_d0_date="2026-11-03", wr_d0="negative", cost_usd=0.008)
+    log.write("recheck6", hid=hid(0), salt_ver=1, r6_skipped=False, r6_readable=True, r6_d1a_state="CANNOT", r6_cost_usd=0.008)
+    assert log.rejected == 0
+    out = report.build(report.load(tmp_path), YEAR, WEEK).splitlines()
+    assert "recheck6 rechecked 1 skipped 0 pending 0" in out and "recheck6 pass 0 hold 1 still not scannable 0" in out

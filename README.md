@@ -2,7 +2,7 @@
 
 A small HTTP service that takes one URL, opens the page in an isolated browser, asks an LLM whether it looks like phishing, and answers `pass`, `hold` or `could_not_scan` with a reason code. It also logs the Google Web Risk verdict for the same URL (on day 0 and again on day 7) so you can measure the judge against an independent signal.
 
-**Advisory only.** The answer blocks nothing, and the response says `"advisory": true`. **Callers: only `pass` lets an ad through; `hold` and `could_not_scan` both stop it.** A caller that tests `decision == "hold"` would let a `could_not_scan` page through, so test `decision != "pass"` instead. Known readers of `decision` in this repo: `llm_url_scan/report.py` (counts `could_not_scan` apart from holds and leaves it out of the hold rate and the Web Risk overlaps), `evals/score.py` (counts `hold` and `could_not_scan` as stopped) and `evals/replay.py` (runs the service's page-fact rules on its changed arms; shop routing only on an arm that asks for it with the suffix `+shop`). Before any caller enforces the answer, a `pass` that carries the `truncated` or `injection_text` flag should be turned into a `hold` (a rule you add at that time, with tests).
+**Advisory only.** The answer blocks nothing, and the response says `"advisory": true`. **Callers: only `pass` lets an ad through; `hold` and `could_not_scan` both stop it.** A caller that tests `decision == "hold"` would let a `could_not_scan` page through, so test `decision != "pass"` instead. Known readers of `decision` in this repo: `llm_url_scan/report.py` (counts `could_not_scan` apart from holds; it is left out of the judged hold rate, the Web Risk overlaps, cost and Sonnet share, and stays in the denominator of the hold rate over all calls answered), `evals/score.py` (counts `hold` and `could_not_scan` as stopped) and `evals/replay.py` (runs the service's page-fact rules on its changed arms; shop routing only on an arm that asks for it with the suffix `+shop`). Before any caller enforces the answer, a `pass` that carries the `truncated` or `injection_text` flag should be turned into a `hold` (a rule you add at that time, with tests).
 
 ## How a scan works
 
@@ -72,7 +72,7 @@ Each secret is a separate file mounted read-only only into the containers that n
 - `pytest -q -m stack`: builds and starts a test stack with local fixture pages and a proxy test profile, runs the isolation canaries, and tears it down. It uses the `10.80.0.0/16` Docker subnets; do not run it next to another stack that uses them.
 - `node --test proxy/egress-proxy.test.mjs`: the proxy's own suite.
 
-**Status:** the network-free suite (`pytest -q`: 398 tests; with `evals/tests` added, 442 pass and 2 skip until their environment variables are set) and the proxy suite (126 tests) pass on this version. The `-m stack` suite, which runs the real containers and the isolation canaries, has not yet been re-run on this version. Run it yourself before relying on the isolation.
+**Status:** the network-free suite (`pytest -q`: 407 tests; with `evals/tests` added, 451 pass and 2 skip until their environment variables are set) and the proxy suite (126 tests) pass on this version. The `-m stack` suite, which runs the real containers and the isolation canaries, passed (26 tests) on this version on one machine; run it yourself before relying on the isolation in your own setup.
 
 ## Demo
 
