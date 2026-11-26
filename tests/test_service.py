@@ -369,6 +369,6 @@ def test_flags_off_restore_the_old_behaviour(make):
     assert scan(api(st), st).json()["decision"] != "could_not_scan" and st.client.models_called()[0] == H
     st = make(client=FakeClient(haiku=[resp(answer())], sonnet=[resp(answer())]), capture=StubCapture({ADDR: CNS_PAGES["page_download"]}), could_not_scan=False)
     assert scan(api(st), st).json()["decision"] != "could_not_scan" and st.client.models_called()[0] == H      # the download-only link goes to the models
-    shop =LONG_TEXT + " Wireless mouse $19.99. Add to cart."
+    shop = LONG_TEXT +" Wireless mouse $19.99. Add to cart."
     st = make(client=FakeClient(haiku=[resp(answer())]), capture=StubCapture({ADDR: page(text=shop)}))      # shop routing is off by default
     assert (scan(api(st), st).json()["reason"], st.client.models_called()) == ("pass_haiku", [H])

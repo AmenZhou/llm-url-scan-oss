@@ -62,7 +62,7 @@ def text(tmp_path):
     "d1a hold web_risk d0 positive 4", "d1a unconfirmed holds 6", "d1a misses pass web_risk positive 2",       # readable pages only
     "haiku alone unconfirmed holds 11", "haiku alone misses pass web_risk positive 2",
     "caller owner unconfirmed holds 6 of 45 judged 13.3% upper bound not a false-positive rate",
-    "unreadable_holds 5 web_risk d0 positive 0 web_risk d7 positive 0",
+    "unreadable 5 web_risk d0 positive 0 web_risk d7 positive 0",
     "p05 3 holds 3 could_not_scan 0", "p15 thin 10 holds 10 could_not_scan 0",
     "d1a pass injection 1", "d1a pass truncated 1", "sonnet PASS injection 1",
     "recheck6 rechecked 1 skipped 1 pending 3", "recheck6 became readable 1", "recheck6 pass 1 hold 0 still not scannable 0",

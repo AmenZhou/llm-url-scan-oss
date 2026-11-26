@@ -1,5 +1,6 @@
 """The eval suite's own logic on a fake model: no network, no ledger file outside tmp_path."""
 import json
+import os
 
 import pytest
 
@@ -31,8 +32,8 @@ def test_case_passes_when_both_runs_give_the_expected_outcome_and_writes_ids_onl
 
 
 def test_shop_routing_is_off_by_default_in_the_suite(ctx, tmp_path):
-    assert C.SHOP_ROUTING is False      # LLMURL_SHOP_ROUTING=1 turns it on
-    ctx["arm"] = R.Arm("EVAL", PROMPT, shop=C.SHOP_ROUTING)
+    assert C.SHOP_ROUTING is (os.environ.get("LLMURL_SHOP_ROUTING") == "1")      # off unless the shell sets exactly 1
+    ctx["arm"] = R.Arm("EVAL", PROMPT, shop=False)      # what ships: the Haiku pass stands
     K.test_expected_outcome_on_both_runs(case(tmp_path, "pass"), ctx)
 
 

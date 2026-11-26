@@ -130,8 +130,8 @@ def build(events, year, week):
         rc = [s for s in judged if s["caller"] == c]
         n = sum(unconfirmed(s) for s in rc)
         say("caller", c, "unconfirmed holds", n, "of", len(rc), "judged", _pct(n, len(rc)), "upper bound not a false-positive rate")
-    say("[unreadable_holds]")
-    say("unreadable_holds", len(unread), "web_risk d0 positive", sum(pos0(s) for s in unread), "web_risk d7 positive", sum(pos7(s) for s in unread))
+    say("[unreadable]")      # could_not_scan on new logs, hold on old ones: either way not a verdict
+    say("unreadable", len(unread), "web_risk d0 positive", sum(pos0(s) for s in unread), "web_risk d7 positive", sum(pos7(s) for s in unread))
 
     say("[patterns]")
     for p in ("p05", "p12", "p13"):
