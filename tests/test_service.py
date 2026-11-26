@@ -349,14 +349,14 @@ def test_recheck6_of_a_could_not_scan_page_is_log_only_and_runs_the_detector_aga
 
 def test_shop_page_pass_goes_to_sonnet_and_a_plain_page_does_not(make):
     shop = LONG_TEXT + " Wireless mouse $19.99. Add to cart."
-    st = make(client=FakeClient(haiku=[resp(answer())], sonnet=[resp(answer("phishing", quotes=[MARKER], rules=["R1"]))]), capture=StubCapture({ADDR: page(text=shop)}))
+    st = make(client=FakeClient(haiku=[resp(answer())], sonnet=[resp(answer("phishing", quotes=[MARKER], rules=["R1"]))]), capture=StubCapture({ADDR: page(text=shop)}), shop_routing=True)
     body = scan(api(st), st).json()
     assert (body["decision"], body["reason"], body["d1a"]["routed_because"]) == ("hold", "hold_sonnet_verdict", "shop_page")
     assert st.client.models_called() == [H, S] and st.svc.log.rejected == 0 and st.log_events()[0]["s_routed_because"] == "shop_page"
-    st = make(client=FakeClient(haiku=[resp(answer())], sonnet=[resp(answer())]), capture=StubCapture({ADDR: page(text=shop)}))
+    st = make(client=FakeClient(haiku=[resp(answer())], sonnet=[resp(answer())]), capture=StubCapture({ADDR: page(text=shop)}), shop_routing=True)
     assert scan(api(st), st).json()["reason"] == "pass_sonnet_confirmed_shop"
     for text in (LONG_TEXT, LONG_TEXT + " Wireless mouse $19.99.", LONG_TEXT + " Add to cart."):
-        st = make(client=FakeClient(haiku=[resp(answer())]), capture=StubCapture({ADDR: page(text=text)}))
+        st = make(client=FakeClient(haiku=[resp(answer())]), capture=StubCapture({ADDR: page(text=text)}), shop_routing=True)
         assert (scan(api(st), st).json()["reason"], st.client.models_called()) == ("pass_haiku", [H])
 
 
@@ -367,5 +367,5 @@ def test_flags_off_restore_the_old_behaviour(make):
     st = make(client=FakeClient(haiku=[resp(answer())], sonnet=[resp(answer())]), capture=StubCapture({ADDR: CNS_PAGES["page_empty"]}), could_not_scan=False)
     assert scan(api(st), st).json()["decision"] != "could_not_scan" and st.client.models_called()[0] == H
     shop = LONG_TEXT + " Wireless mouse $19.99. Add to cart."
-    st = make(client=FakeClient(haiku=[resp(answer())]), capture=StubCapture({ADDR: page(text=shop)}), shop_routing=False)
+    st = make(client=FakeClient(haiku=[resp(answer())]), capture=StubCapture({ADDR: page(text=shop)}))      # shop routing is off by default
     assert (scan(api(st), st).json()["reason"], st.client.models_called()) == ("pass_haiku", [H])

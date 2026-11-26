@@ -14,7 +14,7 @@ def ctx(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "RESULTS", [])
     monkeypatch.setattr(C, "OUT", str(tmp_path / "out.jsonl"))
     reply = lambda m, c: answer("benign") if "haiku" in m else answer("phishing", ["R5"])      # noqa: E731
-    return {"arm": R.Arm("EVAL", PROMPT), "client": Fake(reply), "ledger": R.Ledger(str(tmp_path / "ledger.jsonl")), "state": {"err_run": 0}}
+    return {"arm": R.Arm("EVAL", PROMPT, shop=True), "client": Fake(reply), "ledger": R.Ledger(str(tmp_path / "ledger.jsonl")), "state": {"err_run": 0}}
 
 
 def case(tmp_path, expected):
@@ -28,6 +28,12 @@ def test_case_passes_when_both_runs_give_the_expected_outcome_and_writes_ids_onl
     assert C.RESULTS[0]["ok"] and C.RESULTS[0]["got"] == ["hold", "hold"]
     line = json.loads((tmp_path / "out.jsonl").read_text())
     assert line["decisions"] == ["hold", "hold"] and "example.test" not in json.dumps(line) and line["cost"] > 0
+
+
+def test_shop_routing_is_off_by_default_in_the_suite(ctx, tmp_path):
+    assert C.SHOP_ROUTING is False      # LLMURL_SHOP_ROUTING=1 turns it on
+    ctx["arm"] = R.Arm("EVAL", PROMPT, shop=C.SHOP_ROUTING)
+    K.test_expected_outcome_on_both_runs(case(tmp_path, "pass"), ctx)
 
 
 def test_case_fails_on_a_different_outcome(ctx, tmp_path):

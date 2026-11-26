@@ -7,6 +7,7 @@ Environment (all optional)
   LLMURL_EVAL_OUT         optional jsonl: one line per case (ids, expected, decisions, reasons, cost; no page text)
   LLMURL_EVAL_PROMPT      optional path to a prompt file the arm uses instead of the service's pinned prompt (judge.load_prompt());
                           test only, e.g. LLMURL_EVAL_PROMPT=llm_url_scan/prompts/prompt-v5.md. The service itself always loads prompt-v3.
+  LLMURL_SHOP_ROUTING     1 = the arm also routes price-and-cart pages to Sonnet; anything else = what the service ships (off)
 Prints counts and ids only. Existence of the key file is checked here; it is read only when the first case runs.
 """
 import collections
@@ -29,6 +30,7 @@ RUN_CAP = float(os.environ.get("LLMURL_EVAL_RUN_CAP", "1.50"))
 GRAND_CAP = float(os.environ.get("LLMURL_EVAL_GRAND_CAP", "16.32"))
 OUT = os.environ.get("LLMURL_EVAL_OUT")
 PROMPT_FILE = os.environ.get("LLMURL_EVAL_PROMPT")
+SHOP_ROUTING = os.environ.get("LLMURL_SHOP_ROUTING") == "1"      # same switch and default as the service
 RUN = "eval-" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
 REPEATS = 2
 RESULTS = []      # one dict per finished case, for the summary
@@ -68,7 +70,7 @@ def ctx():
     from llm_url_scan import judge, keys
     if TARGET:      # the build under test must be the one that loaded
         assert os.path.realpath(judge.__file__).startswith(os.path.realpath(TARGET)), "llm_url_scan was not loaded from LLMURL_EVAL_TARGET"
-    return {"arm": R.Arm("EVAL", eval_prompt(judge)), "client": judge.build_client(keys.read_env_value(KEY_FILE, R.KEY_VAR)),
+    return {"arm": R.Arm("EVAL", eval_prompt(judge), shop=SHOP_ROUTING), "client": judge.build_client(keys.read_env_value(KEY_FILE, R.KEY_VAR)),
             "ledger": R.Ledger(LEDGER), "state": {"err_run": 0}}
 
 

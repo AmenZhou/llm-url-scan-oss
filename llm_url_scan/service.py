@@ -47,7 +47,7 @@ def _view(rec):
 
 
 class Service:
-    def __init__(self, *, client, webrisk, capture, ledger, log, store, salt, salt_ver, prompt, could_not_scan=True, shop_routing=True,
+    def __init__(self, *, client, webrisk, capture, ledger, log, store, salt, salt_ver, prompt, could_not_scan=True, shop_routing=False,
                  clock=lambda: datetime.now(timezone.utc), sleep=time.sleep):
         self.could_not_scan, self.shop_routing = could_not_scan, shop_routing
         self.client, self.webrisk, self.capture, self.ledger, self.log, self.store = client, webrisk, capture, ledger, log, store

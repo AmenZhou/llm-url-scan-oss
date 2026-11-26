@@ -24,7 +24,7 @@ class Config:
     worker_url: str = "http://capture:7100"      # the capture worker on api-net
     worker_token_file: str = "/run/worker/worker_token"
     could_not_scan: bool = True                  # LLMURL_COULD_NOT_SCAN=0: unreadable pages are holds again and the page-fact detector is off
-    shop_routing: bool = True                    # LLMURL_SHOP_ROUTING=0: no Sonnet look at Haiku-passed pages that show a price and a cart phrase
+    shop_routing: bool = False                   # LLMURL_SHOP_ROUTING=1: a Sonnet look at Haiku-passed pages that show a price and a cart phrase (off unless exactly "1")
     test_mode: bool = False                    # stack tests only: a fake judge and fake Web Risk, no key file read (LLMURL_TEST_MODE=1)
 
     @classmethod
@@ -44,7 +44,7 @@ class Config:
         c.worker_url = g("LLMURL_WORKER_URL", c.worker_url)
         c.worker_token_file = g("LLMURL_WORKER_TOKEN_FILE", c.worker_token_file)
         c.could_not_scan = g("LLMURL_COULD_NOT_SCAN", "1") != "0"
-        c.shop_routing = g("LLMURL_SHOP_ROUTING", "1") != "0"
+        c.shop_routing = g("LLMURL_SHOP_ROUTING", "0") == "1"
         c.test_mode = g("LLMURL_TEST_MODE") == "1"
         if c.test_mode and g(TEST_MODE_ACK) != "1":
             raise SystemExit("LLMURL_TEST_MODE=1 replaces the judge with a fake that judges nothing; set " + TEST_MODE_ACK + "=1 as well, or unset LLMURL_TEST_MODE.")

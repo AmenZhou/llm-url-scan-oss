@@ -154,6 +154,7 @@ def test_load_pages_and_parse_arm(tmp_path):
 
 # ---------------------------------------------------------------- the changed decision: detector and shop routing
 CHANGED, OLD = R.Arm("CHANGED", PROMPT), R.Arm("OLD", PROMPT, legacy=True)
+CHANGED_SHOP = R.Arm("CHANGED_SHOP", PROMPT, shop=True)
 ERROR_PAGE = "<html><head><title>404 Not Found</title></head><body><p>The page you asked for is gone.</p></body></html>"
 SHOP = "<html><head><title>page-shop</title></head><body><p>%s Price $19.99. Add to cart now.</p></body></html>" % LONG
 
@@ -167,13 +168,12 @@ def test_changed_arm_answers_could_not_scan_before_any_model_call_and_old_arm_st
     assert fake.calls.count(R.judge.HAIKU) == 1 and led.spent() > 0      # only the OLD arm spent
 
 
-def test_changed_arm_sends_a_haiku_passed_shop_page_to_sonnet_old_arm_does_not(tmp_path):
+def test_only_a_shop_arm_sends_a_haiku_passed_shop_page_to_sonnet(tmp_path):
     def reply(model, content):
         return answer("benign") if "haiku" in model else answer("phishing", ["R5"])
-    _, lines, _ = run(tmp_path, [{"id": "s", "label": "phishing", "url": "https://example.test/s", "html": SHOP}], Fake(reply), [CHANGED, OLD])
-    c, o = lines["CHANGED"][0], lines["OLD"][0]
-    assert (c["decision"], c["routed_because"], len(c["calls"])) == ("hold", "shop_page", 2)
-    assert (o["decision"], o["routed_because"], len(o["calls"])) == ("pass", None, 1)
+    _, lines, _ = run(tmp_path, [{"id": "s", "label": "phishing", "url": "https://example.test/s", "html": SHOP}], Fake(reply), [CHANGED, CHANGED_SHOP, OLD])
+    got = {k: (v[0]["decision"], v[0]["routed_because"], len(v[0]["calls"])) for k, v in lines.items()}
+    assert got == {"CHANGED": ("pass", None, 1), "CHANGED_SHOP": ("hold", "shop_page", 2), "OLD": ("pass", None, 1)}      # no suffix = what ships
 
 
 def test_parse_arm_flags(tmp_path):
@@ -182,3 +182,4 @@ def test_parse_arm_flags(tmp_path):
     a = R.parse_arm("X=%s+money+legacy" % pf)
     assert (a.route_money, a.legacy) == (True, True)
     assert (R.parse_arm("Y=%s+legacy" % pf).legacy, R.parse_arm("Z=%s" % pf).legacy) == (True, False)
+    assert (R.parse_arm("S=%s+shop" % pf).shop, R.parse_arm("S=%s+shop+legacy" % pf).legacy, R.parse_arm("Z=%s" % pf).shop) == (True, True, False)

@@ -43,10 +43,11 @@ class Halt(Exception):
 
 
 class Arm:
-    """`legacy` = the unchanged service's decision (no could-not-scan detector, no shop routing); otherwise the changed one when the build has it."""
+    """`legacy` = the unchanged service's decision (no could-not-scan detector, no shop routing); otherwise the changed one when the build has it,
+    with shop routing only when `shop` asks (the service ships with it off)."""
 
-    def __init__(self, name, prompt, route_money=False, legacy=False):
-        self.name, self.prompt, self.route_money, self.legacy = name, prompt, route_money, legacy
+    def __init__(self, name, prompt, route_money=False, legacy=False, shop=False):
+        self.name, self.prompt, self.route_money, self.legacy, self.shop = name, prompt, route_money, legacy, shop
 
 
 class Ledger:
@@ -148,7 +149,7 @@ def judge_page(rec, arm, client, ledger, run, run_cap, grand_cap, repeat, state)
         return {"id": rec["id"], "arm": arm.name, "repeat": repeat, "run": run, "label": rec.get("label"), "decision": "could_not_scan",
                 "judge_decision": "could_not_scan", "reason": why, "routed_because": None, "short": info["text_chars"] <= D.SHORT_CHARS, "money": money,
                 "calls": [], "cost": 0.0}
-    shop = bool(changed and PF.shop_signal(raw))
+    shop = bool(changed and arm.shop and PF.shop_signal(raw))
 
     def call(model):
         amount = judge.reservation([model], judge.input_bound(arm.prompt, msg))      # (1 + 1 retry) x the per-call worst case
@@ -208,14 +209,14 @@ def run_arms(pages, arms, client, ledger, run, run_cap, grand_cap, out_dir, repe
 
 
 def parse_arm(spec):
-    """NAME=prompt_file, optionally followed by +money and/or +legacy (the unchanged decision)."""
+    """NAME=prompt_file, optionally followed by +money, +shop (shop routing, off in the shipped service) and/or +legacy (the unchanged decision)."""
     name, _, rest = spec.partition("=")
     flags = set()
-    while rest.endswith(("+money", "+legacy")):
+    while rest.endswith(("+money", "+legacy", "+shop")):
         rest, _, flag = rest.rpartition("+")
         flags.add(flag)
     with open(rest, encoding="utf-8") as f:
-        return Arm(name, f.read(), "money" in flags, "legacy" in flags)
+        return Arm(name, f.read(), "money" in flags, "legacy" in flags, "shop" in flags)
 
 
 def main():
