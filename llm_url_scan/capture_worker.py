@@ -180,20 +180,20 @@ class Slot:
             raise Unavailable()
         last = hops[-1] if hops else None
         denials = [d for d in proxy if d.get("decision") == "deny"]
-        shaped = "ERR_TUNNEL_CONNECTION_FAILED" in r["err_text"] or (last is not None and last[0] == 403 and last[2] == "deny")      # a page cannot fake the buffer
+        errs = [d for d in proxy if d.get("decision") == "error"]
+        dead502 = last is not None and last[0] == 502 and last[2] == "error" and bool(errs)      # plain http: the proxy's own 502 for a dead host
+        shaped = "ERR_TUNNEL_CONNECTION_FAILED" in r["err_text"] or (last is not None and last[0] == 403 and last[2] == "deny") or dead502      # a page cannot fake the buffer
         deny = denials[0] if denials and shaped else None
         err_text, kind, html = r["err_text"], r["kind"], r["html"]
-        if deny is None and shaped and not denials:
-            errs = [d for d in proxy if d.get("decision") == "error"]
-            if errs:      # proxy could not connect upstream: a dead host, not a refusal
-                err_text += " ERR_CONNECTION_RESET"
-        if deny is not None:      # the body of a proxy denial is never page text
+        if deny is None and shaped and not denials and errs:      # proxy could not connect upstream: a dead host, not a refusal
+            err_text += " ERR_CONNECTION_RESET"
+        if deny is not None or (dead502 and not denials):      # the body of a proxy denial or error is never page text
             kind, html = kind or "error", None
         if kind is None and html is not None and urlsplit(r["final_url"] or "").scheme not in ("http", "https"):
             kind = "error"
         text = pt.html_to_text(html) if html is not None else None
-        scan = pt.scan_page(html) if html is not None else None
-        forms = (len(scan["forms"]) + len(scan["loose_fields"])) if scan else 0
+        scan = pt.scan_page(html or "")      # a download-only link has no html
+        forms = len(scan["forms"]) + len(scan["loose_fields"])
         status = [h for h in hops if h[0] is not None]
         last_status = status[-1][0] if status else None
         klass = "%dxx" % (last_status // 100) if last_status and 200 <= last_status < 600 else None

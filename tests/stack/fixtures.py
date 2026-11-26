@@ -77,6 +77,8 @@ class H(BaseHTTPRequestHandler):
             self._send(403, "<html><body>Forbidden</body></html>")
         elif p == "/redirect":
             self._send(302, "", [("Location", "/ok")])
+        elif p == "/file":      # a link that only sends an attachment: no page
+            self._send(200, "made up file body", [("Content-Disposition", 'attachment; filename="made-up.bin"')])
         elif p == "/hang":
             time.sleep(40)
             self._send(200, OK)

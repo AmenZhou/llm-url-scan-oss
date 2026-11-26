@@ -320,6 +320,7 @@ CNS_PAGES = {
     "page_error": page(text=LURE, meta="title: Error 404"),                       # a credential lure on an error page is still never a pass
     "page_bot_wall": page(text="Just a moment while we check your browser. " + LURE),
     "page_parked": page(text="This domain is parked. " + LURE),
+    "page_download": page(text="", meta="title: \nhttp_status: 200\nredirects: 0\ndownload: yes (.exe)"),
 }
 
 
@@ -366,6 +367,8 @@ def test_flags_off_restore_the_old_behaviour(make):
     assert (body["decision"], body["reason"]) == ("hold", "unreadable_gone") and st.svc.store.rows()[0][3] is not None
     st = make(client=FakeClient(haiku=[resp(answer())], sonnet=[resp(answer())]), capture=StubCapture({ADDR: CNS_PAGES["page_empty"]}), could_not_scan=False)
     assert scan(api(st), st).json()["decision"] != "could_not_scan" and st.client.models_called()[0] == H
-    shop = LONG_TEXT + " Wireless mouse $19.99. Add to cart."
+    st = make(client=FakeClient(haiku=[resp(answer())], sonnet=[resp(answer())]), capture=StubCapture({ADDR: CNS_PAGES["page_download"]}), could_not_scan=False)
+    assert scan(api(st), st).json()["decision"] != "could_not_scan" and st.client.models_called()[0] == H      # the download-only link goes to the models
+    shop =LONG_TEXT + " Wireless mouse $19.99. Add to cart."
     st = make(client=FakeClient(haiku=[resp(answer())]), capture=StubCapture({ADDR: page(text=shop)}))      # shop routing is off by default
     assert (scan(api(st), st).json()["reason"], st.client.models_called()) == ("pass_haiku", [H])

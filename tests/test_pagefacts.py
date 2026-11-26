@@ -15,6 +15,9 @@ def sec(text="", forms="", title=""):
 @pytest.mark.parametrize("s, want", [
     (sec(), "page_empty"),
     (sec("   \n "), "page_empty"),
+    ({**sec(), "page_meta": "title: \nhttp_status: 200\nredirects: 0\ndownload: yes (.exe)"}, "page_download"),
+    (sec(title="download: yes"), "page_empty"),                             # the title is one line: it cannot fake the download line
+    ({**sec("Real visible text"), "page_meta": "title: x\ndownload: yes"}, None),      # text that also starts a download goes to the models
     (sec("", HIDDEN), None),                                                # a form block means the judge has something to read
     (sec("Just a moment while we check your browser."), "page_bot_wall"),
     (sec("Please wait", title="Attention Required"), "page_bot_wall"),

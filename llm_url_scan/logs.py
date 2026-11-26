@@ -13,7 +13,7 @@ DETAILS = ("deadline", "name_blocked", "numeric_host", "literal_blocked", "resol
 RANGE_CLASSES = ("private", "loopback_or_unspecified", "link_local_or_metadata", "reserved_or_doc", "own_or_extra", "v6_other")
 DECISION_REASONS = ("unreadable_gone", "unreadable_site_blocked", "unreadable_proxy_refused", "unreadable_other", "pass_haiku",
                     "pass_sonnet_confirmed_short", "pass_sonnet_overrode_hold", "pass_sonnet_resolved", "hold_sonnet_verdict",
-                    "hold_sonnet_cannot_tell", "hold_sonnet_failed", "pass_sonnet_confirmed_shop", "page_empty", "page_error", "page_bot_wall", "page_parked")
+                    "hold_sonnet_cannot_tell", "hold_sonnet_failed", "pass_sonnet_confirmed_shop", "page_empty", "page_error", "page_bot_wall", "page_parked", "page_download")
 STATES = ("PASS", "HOLD", "CANNOT", "UNREAD")
 ROUTES = ("h_hold", "h_cannot", "h_failed", "short_pass", "shop_page")
 WR_STATES = ("positive", "negative", "error", "not_checked")

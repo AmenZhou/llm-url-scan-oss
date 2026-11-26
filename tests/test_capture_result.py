@@ -71,6 +71,24 @@ def test_proxy_dns_denial_is_gone_and_upstream_failure_is_unreachable():
     assert (d["unreadable_reason"], d["unreadable_detail"]) == ("gone", "unreachable")
 
 
+@pytest.mark.parametrize("body", ["dns-failed", "upstream"])
+def test_plain_http_dead_host_502_is_gone_and_its_body_is_never_page_text(body):
+    d = res(hops=[(502, None, "error", "upstream-failed")], html="<html><body><pre>%s\n</pre></body></html>" % body,
+            proxy=[{"decision": "error", "reason": body, "range_class": None, "port_class": "80"}])
+    assert (d["readable"], d["unreadable_reason"], d["sections"]) == (False, "gone", {})
+
+
+def test_a_sites_own_502_page_and_a_failed_subresource_stay_readable():
+    assert res(hops=[(502, None, None, None)])["readable"]      # no proxy header, no buffered error
+    assert res(hops=[(502, None, "error", "upstream-failed")], proxy=[])["readable"]      # a page cannot fake the buffer
+    assert res(proxy=[{"decision": "error", "reason": "upstream", "range_class": None, "port_class": "80"}])["readable"]      # a sub-resource failed
+
+
+def test_a_download_only_link_is_readable_with_download_yes_and_does_not_raise():
+    d = res(html=None, download=(".exe", 0))
+    assert d["readable"] and d["forms"] == 0 and d["sections"]["page_text"] == "" and "\ndownload: yes (.exe)" in d["sections"]["page_meta"]
+
+
 def test_a_proxy_limit_denial_is_our_capacity():
     with pytest.raises(Unavailable):
         res(proxy=[{"decision": "deny", "reason": "limit", "range_class": None, "port_class": "other"}])

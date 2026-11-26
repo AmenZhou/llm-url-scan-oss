@@ -29,10 +29,10 @@ def visible_fields(forms):
 
 
 def could_not_scan_reason(sec):
-    """-> None | "page_empty" | "page_bot_wall" | "page_parked" | "page_error". Wording rules apply only to short pages; most also need no visible field."""
+    """-> None | "page_download" | "page_empty" | "page_bot_wall" | "page_parked" | "page_error". Wording rules apply only to short pages; most also need no visible field."""
     text, forms, meta = (sec.get("page_text") or "").strip(), sec.get("page_forms") or "", sec.get("page_meta") or ""
     if not text and not _HAS_FORM.search(forms):
-        return "page_empty"
+        return "page_download" if re.search(r"(?m)^download:", meta) else "page_empty"
     if len(text) > SHORT_CHARS:
         return None
     title, bare = _title(meta), not visible_fields(forms)

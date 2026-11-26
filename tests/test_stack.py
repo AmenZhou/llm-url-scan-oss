@@ -136,7 +136,7 @@ def test_fetch_through_proxy_reaches_the_judge_path(stack):
 ])
 def test_unreadable_site_reasons(stack, path, reason, detail, rng):
     a = stack.scan(FX + path)
-    assert (a["readable"], a["unreadable_reason"], a["models_run"], a["decision"]) == (False, reason, [], "hold")
+    assert (a["readable"], a["unreadable_reason"], a["models_run"], a["decision"]) == (False, reason, [], "could_not_scan")
     ev = stack.log()[-1]
     assert (ev["unreadable_detail"], ev.get("range_class"), ev["reason"]) == (detail, rng, "unreadable_" + reason)
 
@@ -144,15 +144,28 @@ def test_unreadable_site_reasons(stack, path, reason, detail, rng):
 def test_unreadable_refused_by_our_proxy(stack):
     """A name that resolves to a private address is refused by the proxy (not allowlisted): proxy_refused with its range class."""
     a = stack.scan("http://refused.example:8080/ok")
-    assert (a["readable"], a["unreadable_reason"], a["decision"], a["reason"]) == (False, "proxy_refused", "hold", "unreadable_proxy_refused")
+    assert (a["readable"], a["unreadable_reason"], a["decision"], a["reason"]) == (False, "proxy_refused", "could_not_scan", "unreadable_proxy_refused")
     ev = stack.log()[-1]
     assert (ev["unreadable_detail"], ev["range_class"]) == ("resolved_blocked", "private")
 
 
+def test_dead_host_on_plain_http_is_gone_not_a_page(stack):
+    """A name that does not resolve, on plain http: the proxy answers 502 `dns-failed`; that body is never read as a page."""
+    a = stack.scan("http://nonexistent.invalid/")
+    assert (a["readable"], a["unreadable_reason"], a["models_run"], a["decision"]) == (False, "gone", [], "could_not_scan")
+    assert stack.log()[-1]["reason"] == "unreadable_gone"
+
+
+def test_download_only_link_is_could_not_scan(stack):
+    """A path that only sends an attachment: readable, no text, no model, could_not_scan / page_download (a 200 answer, not a 503)."""
+    a = stack.scan(FX + "/file")
+    assert (a["readable"], a["models_run"], a["decision"], a["reason"]) == (True, [], "could_not_scan", "page_download")
+
+
 def test_unreadable_other_timeout(stack):
-    """A page that never answers: two tries, then an unreadable `other` hold (a 200 answer, not an error)."""
+    """A page that never answers: two tries, then an unreadable `other` could_not_scan (a 200 answer, not an error)."""
     a = stack.scan(FX + "/hang")
-    assert (a["readable"], a["unreadable_reason"], a["decision"]) == (False, "other", "hold")
+    assert (a["readable"], a["unreadable_reason"], a["decision"]) == (False, "other", "could_not_scan")
     ev = stack.log()[-1]
     assert (ev["unreadable_detail"], ev["tries"]) == ("deadline", 2)
 
