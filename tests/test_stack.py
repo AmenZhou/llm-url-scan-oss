@@ -150,8 +150,9 @@ def test_unreadable_refused_by_our_proxy(stack):
 
 
 def test_dead_host_on_plain_http_is_gone_not_a_page(stack):
-    """A name that does not resolve, on plain http: the proxy answers 502 `dns-failed`; that body is never read as a page."""
-    a = stack.scan("http://nonexistent.invalid/")
+    """A name that does not resolve, on plain http: the proxy answers 502 `dns-failed`; that body is never read as a page.
+    A reserved .example name off the allowlist passes the address check (B-1 refuses .invalid with 422) and then fails to resolve."""
+    a = stack.scan("http://no-such-host.example/")
     assert (a["readable"], a["unreadable_reason"], a["models_run"], a["decision"]) == (False, "gone", [], "could_not_scan")
     assert stack.log()[-1]["reason"] == "unreadable_gone"
 
