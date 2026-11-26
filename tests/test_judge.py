@@ -11,7 +11,7 @@ from conftest import FakeClient, answer, resp
 
 
 def test_prompt_matches_its_recorded_hash():
-    assert hashlib.sha256(judge.PROMPT_PATH.read_bytes()).hexdigest() == "7886b515bee22ee28fa73b3ed850d0c957a8db4abf61e0d46dd9fefe9d9ea9c8"
+    assert hashlib.sha256(judge.PROMPT_PATH.read_bytes()).hexdigest() == "1c7b2bbe7e1e8c296f7b0db4dc32b51a17dfa6ea46b67592d0c3962a865c49d7"
     assert load_prompt()
 
 

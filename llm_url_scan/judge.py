@@ -10,8 +10,8 @@ import unicodedata
 from pathlib import Path
 from urllib.parse import urlsplit
 
-PROMPT_PATH = Path(__file__).parent / "prompts" / "prompt-v5.md"
-PROMPT_SHA = "7886b515bee22ee28fa73b3ed850d0c957a8db4abf61e0d46dd9fefe9d9ea9c8"
+PROMPT_PATH = Path(__file__).parent / "prompts" / "prompt-v3.md"
+PROMPT_SHA = "1c7b2bbe7e1e8c296f7b0db4dc32b51a17dfa6ea46b67592d0c3962a865c49d7"
 ANTHROPIC_BASE = "https://api.anthropic.com"
 HAIKU, SONNET = "claude-haiku-5-5", "claude-sonnet-5-5"
 PRICES = {HAIKU: (0.10, 0.50), SONNET: (2.00, 10.00)}   # USD per million tokens, in / out
