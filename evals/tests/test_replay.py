@@ -183,3 +183,34 @@ def test_parse_arm_flags(tmp_path):
     assert (a.route_money, a.legacy) == (True, True)
     assert (R.parse_arm("Y=%s+legacy" % pf).legacy, R.parse_arm("Z=%s" % pf).legacy) == (True, False)
     assert (R.parse_arm("S=%s+shop" % pf).shop, R.parse_arm("S=%s+shop+legacy" % pf).legacy, R.parse_arm("Z=%s" % pf).shop) == (True, True, False)
+
+
+# ---------------------------------------------------------------- +anyprice: any price amount routes a Haiku pass to Sonnet
+ANYPRICE = R.Arm("ANYPRICE", PROMPT, anyprice=True)
+PRICE_ONLY = "<html><head><title>page-price</title></head><body><p>%s Only $19.99 today.</p></body></html>" % LONG
+NO_PRICE = "<html><head><title>page-none</title></head><body><p>%s Nothing for sale here.</p></body></html>" % LONG
+
+
+def test_anyprice_routes_price_only_and_cart_pages_but_not_a_page_without_a_price(tmp_path):
+    def reply(model, content):
+        return answer("benign") if "haiku" in model else answer("phishing", ["R5"])
+    pages = [{"id": i, "label": "phishing", "url": "https://example.test/" + i, "html": h} for i, h in (("p", PRICE_ONLY), ("c", SHOP), ("n", NO_PRICE))]
+    _, lines, _ = run(tmp_path, pages, Fake(reply), [CHANGED, ANYPRICE])
+    got = {(k, v["id"]): (v["decision"], v["routed_because"], len(v["calls"])) for k, vs in lines.items() for v in vs}
+    assert got == {("CHANGED", "p"): ("pass", None, 1), ("CHANGED", "c"): ("pass", None, 1), ("CHANGED", "n"): ("pass", None, 1),
+                   ("ANYPRICE", "p"): ("hold", "price_page", 2), ("ANYPRICE", "c"): ("hold", "price_page", 2), ("ANYPRICE", "n"): ("pass", None, 1)}
+
+
+def test_anyprice_reason_when_sonnet_confirms_pass_and_it_wins_over_shop(tmp_path):
+    both = R.Arm("BOTH", PROMPT, shop=True, anyprice=True)
+    _, lines, _ = run(tmp_path, [{"id": "s", "label": "benign", "url": "https://example.test/s", "html": SHOP}], Fake(lambda m, c: answer("benign")), [both])
+    assert (lines["BOTH"][0]["routed_because"], lines["BOTH"][0]["reason"]) == ("price_page", "pass_sonnet_confirmed_price")
+
+
+def test_parse_arm_anyprice_suffix(tmp_path):
+    pf = tmp_path / "p.md"
+    pf.write_text("x")
+    a = R.parse_arm("A=%s+anyprice" % pf)
+    assert (a.anyprice, a.shop, a.legacy, a.route_money) == (True, False, False, False)
+    b = R.parse_arm("B=%s+shop+anyprice+money" % pf)
+    assert (b.anyprice, b.shop, b.route_money) == (True, True, True) and R.parse_arm("C=%s+shop" % pf).anyprice is False

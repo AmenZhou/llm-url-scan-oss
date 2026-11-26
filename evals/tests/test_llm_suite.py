@@ -37,6 +37,14 @@ def test_shop_routing_is_off_by_default_in_the_suite(ctx, tmp_path):
     K.test_expected_outcome_on_both_runs(case(tmp_path, "pass"), ctx)
 
 
+def test_anyprice_is_off_by_default_in_the_suite_and_on_when_set(monkeypatch):
+    assert C.ANYPRICE is (os.environ.get("LLMURL_EVAL_ANYPRICE") == "1")
+    monkeypatch.setattr(C, "ANYPRICE", False)
+    assert C.eval_arm(PROMPT).anyprice is False      # what ships
+    monkeypatch.setattr(C, "ANYPRICE", True)
+    assert C.eval_arm(PROMPT).anyprice is True
+
+
 def test_case_fails_on_a_different_outcome(ctx, tmp_path):
     with pytest.raises(AssertionError, match="expected=pass"):
         K.test_expected_outcome_on_both_runs(case(tmp_path, "pass"), ctx)
