@@ -1,4 +1,4 @@
-"""Page-fact rules over the sections the service holds after capture (page_meta, page_text, page_forms). Pure functions, stdlib only.
+"""Page-fact rules over the sections the service holds after capture (page_meta, page_text, page_forms). Pure functions, no I/O.
 could_not_scan_reason: a page that was read but shows nothing to judge (empty, bot wall, parked, error page). shop_signal: a price and a cart phrase."""
 import re
 
@@ -13,7 +13,6 @@ _ERROR = re.compile(r"(page not found|file not found|could not be found|can(?:no
                     r"\b(?:404|403|500|502|503)\b[ :-]*(?:error|not found|forbidden|service unavailable)|an error (?:was|has|occurred|occured)|unable to load|"
                     r"service unavailable|temporarily unavailable|under maintenance|ページが見つかり|見つかりませんでした|找不到|頁面執行錯誤|页面不存在|"
                     r"страница не найдена|página no encontrada|seite nicht gefunden|page introuvable|pagina non trovata|sayfa bulunamad)", re.I)
-_ERROR_TITLE = re.compile(r"(\b(?:404|403|500|502|503)\b|not found|\berror\b|forbidden|unavailable|ページが見つかり|見つかりませんでした|找不到|錯誤|错误|ошибка)", re.I)
 _AMOUNT = re.compile(r"[$€£¥]\s?\d|\b\d+(?:[.,]\d{2})?\s?(?:usd|eur|gbp)\b", re.I)
 _CART = re.compile(r"\b(?:add to cart|buy now|checkout|free shipping)\b", re.I)
 
@@ -29,18 +28,19 @@ def visible_fields(forms):
 
 
 def could_not_scan_reason(sec):
-    """-> None | "page_download" | "page_empty" | "page_bot_wall" | "page_parked" | "page_error". Wording rules apply only to short pages; most also need no visible field."""
+    """-> None | "page_download" | "page_empty" | "page_bot_wall" | "page_parked" | "page_error".
+    Wording rules (title and text) apply only to short pages with no visible field: a page a visitor could type into always reaches the models."""
     text, forms, meta = (sec.get("page_text") or "").strip(), sec.get("page_forms") or "", sec.get("page_meta") or ""
     if not text and not _HAS_FORM.search(forms):
         return "page_download" if re.search(r"(?m)^download:", meta) else "page_empty"
-    if len(text) > SHORT_CHARS:
+    if len(text) > SHORT_CHARS or visible_fields(forms):
         return None
-    title, bare = _title(meta), not visible_fields(forms)
-    if PT._BOT_WALL.search(title) or _WALL_EXTRA.search(title) or (bare and (PT._BOT_WALL.search(text) or _WALL_EXTRA.search(text))):
+    title = _title(meta)
+    if any(rx.search(s) for rx in (PT._BOT_WALL, _WALL_EXTRA) for s in (title, text)):
         return "page_bot_wall"
-    if bare and PT._PARKED.search(text):
+    if PT._PARKED.search(text):
         return "page_parked"
-    if _ERROR_TITLE.search(title) or (bare and _ERROR.search(text)):
+    if _ERROR.search(title) or _ERROR.search(text):      # an error phrase, not a bare number or "error" ("Fortune 500 list")
         return "page_error"
     return None
 

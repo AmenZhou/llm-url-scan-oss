@@ -21,7 +21,8 @@ def sec(text="", forms="", title=""):
     (sec("", HIDDEN), None),                                                # a form block means the judge has something to read
     (sec("Just a moment while we check your browser."), "page_bot_wall"),
     (sec("Please wait", title="Attention Required"), "page_bot_wall"),
-    (sec("Sign in to continue", LOGIN, title="Just a moment..."), "page_bot_wall"),      # title rule applies even with fields
+    (sec("Please wait", title="Just a moment..."), "page_bot_wall"),
+    (sec("Welcome", title="404 Not Found"), "page_error"),                  # an error phrase in the title
     (sec("This domain is for sale. Buy this domain today."), "page_parked"),
     (sec("Sorry, the page not found here."), "page_error"),
     (sec("Welcome", SEARCH, title="Page Not Found"), "page_error"),         # a search box is not a visible field
@@ -36,6 +37,10 @@ def test_detector_flags(s, want):
     sec("Sign in. An error here would be shown in red.", LOGIN),            # short real login with the word error
     sec("Sign in. This domain is for sale elsewhere.", LOGIN),              # wording rules need no visible field
     sec("Please verify you are a human", LOGIN),
+    sec("Sign in to continue", LOGIN, title="Just a moment..."),           # a form page reaches the models whatever its title says
+    sec("Sign in", LOGIN, title="Error 404"),
+    sec("Our yearly ranking of companies.", title="Fortune 500 list"),     # a bare number in the title is not an error page
+    sec("Something went wrong on our side, try later.", title="Error"),    # nor a bare "error"
     sec("Welcome to our shop. We ship worldwide. See 404 items.", ""),     # bare number is not enough
     sec("Short ordinary page about gardening tips and soil care."),
     sec("x" * 1500 + " page not found"),                                    # long pages skip the wording rules
