@@ -20,6 +20,8 @@ def test_shop_route_only_for_a_long_haiku_pass():
     assert decide(PASS, PASS, False, True)["reason"] == "pass_sonnet_confirmed_shop"
     assert decide(PASS, HOLD, False, True) == {"decision": "hold", "reason": "hold_sonnet_verdict", "d1a_state": "HOLD", "routed_because": "shop_page"}
     assert decide(PASS, CANNOT, False, True)["reason"] == "hold_sonnet_cannot_tell"
+    for broken in (FAILED, ERROR):      # a shop-routed Sonnet call that fails holds, as a short pass does
+        assert (decide(PASS, broken, False, True)["decision"], decide(PASS, broken, False, True)["reason"]) == ("hold", "hold_sonnet_failed")
 
 
 # (row, haiku, short, sonnet, decision, reason, routed_because)

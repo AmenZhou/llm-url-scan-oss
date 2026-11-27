@@ -9,14 +9,15 @@ This repository is public. **Before any push, tag, release, pull request or othe
 and read every finding.** No exceptions for small changes, docs-only changes or force-pushes.
 
 ```
-LEAK_CHECK_PRIVATE_WORDS="name1,name2" python scripts/leak_check.py    # compares HEAD with origin/main; pass another base if the branch starts elsewhere
+LEAK_CHECK_PRIVATE_WORDS="name1,name2" python scripts/leak_check.py origin/<branch>    # only what this push adds; no base = everything since origin/main
 ```
 
-It scans what the push would add (added lines and commit messages) and prints only the place and kind of each finding:
+It scans every commit the push would publish (each commit's added lines, so a leak added and removed again is still
+found, plus commit messages and author names) and prints only the place and kind of each finding:
 
 | Kind | Means | Fix |
 |---|---|---|
-| `unlisted_host` | a web address whose host is not a reserved test name (`*.example`, `*.test`, `*.invalid`, `example.com`, `localhost`) or on the script's short allow list | use a reserved test name; if the real host is needed and harmless (a public API), add a comment `leak-ok: <reason>` on that line |
+| `unlisted_host` | an address (any scheme, or `git@host:`) whose host is not a reserved test name (`*.example`, `*.test`, `*.invalid`, `example.com`, `localhost`) or on the script's short allow list | use a reserved test name; if the real host is needed and harmless (a public API), add a comment `leak-ok: <reason>` on that line |
 | `home_path` | a path into someone's home folder | read it from an environment variable or a relative path |
 | `api_key`, `private_key` | a key or token | remove it, rewrite the commit, and rotate the key |
 | `private_word` | a word from `LEAK_CHECK_PRIVATE_WORDS` (a comma list you set locally, e.g. names of datasets whose results are not public; kept out of the repo on purpose) | remove it |

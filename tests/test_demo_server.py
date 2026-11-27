@@ -95,6 +95,13 @@ def test_unknown_id_or_any_other_shape_is_400_and_the_client_is_never_called(srv
     assert post(port, bad)[0] == 400 and c.calls == []
 
 
+def test_a_non_ascii_digit_length_is_400_not_a_crash(srv):
+    c = FakeClient()
+    _, port = srv(c)
+    h = {"Content-Type": "application/json", "Origin": "http://127.0.0.1:%d" % port, "Content-Length": "²"}      # "²".isdigit() is True
+    assert call(port, "POST", "/api/scan", None, h)[0] == 400 and c.calls == []
+
+
 def test_second_scan_while_busy_is_409(srv):
     c = FakeClient()
     c.gate = threading.Event()

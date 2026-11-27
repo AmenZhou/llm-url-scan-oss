@@ -48,6 +48,8 @@ class Arm:
     a price amount goes to Sonnet, no cart phrase needed. It is a superset of `shop`, so with both set any-price wins."""
 
     def __init__(self, name, prompt, route_money=False, legacy=False, shop=False, anyprice=False):
+        if (shop or anyprice) and (legacy or PF is None):      # these routings need the changed decision; silently dropping them would mislabel the arm
+            raise ValueError("arm %s: +shop/+anyprice need the changed decision (not +legacy, and a build with page-fact rules)" % name)
         self.name, self.prompt, self.route_money, self.legacy, self.shop, self.anyprice = name, prompt, route_money, legacy, shop, anyprice
 
 
@@ -185,6 +187,9 @@ def judge_page(rec, arm, client, ledger, run, run_cap, grand_cap, repeat, state)
 
 def run_arms(pages, arms, client, ledger, run, run_cap, grand_cap, out_dir, repeats=1):
     """Arms and repeats interleaved page by page. A (page, arm, repeat) already in its result file is skipped. -> Counter."""
+    names = [a.name for a in arms]
+    if len(set(names)) != len(names):      # two arms with one name would append to one result file and be scored as one
+        raise ValueError("duplicate arm names: %s" % sorted({x for x in names if names.count(x) > 1}))
     os.makedirs(out_dir, exist_ok=True)
     path = {a.name: os.path.join(out_dir, "%s-%s.jsonl" % (run, a.name)) for a in arms}
     done = set()

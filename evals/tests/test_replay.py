@@ -182,7 +182,24 @@ def test_parse_arm_flags(tmp_path):
     a = R.parse_arm("X=%s+money+legacy" % pf)
     assert (a.route_money, a.legacy) == (True, True)
     assert (R.parse_arm("Y=%s+legacy" % pf).legacy, R.parse_arm("Z=%s" % pf).legacy) == (True, False)
-    assert (R.parse_arm("S=%s+shop" % pf).shop, R.parse_arm("S=%s+shop+legacy" % pf).legacy, R.parse_arm("Z=%s" % pf).shop) == (True, True, False)
+    assert (R.parse_arm("S=%s+shop" % pf).shop, R.parse_arm("Z=%s" % pf).shop) == (True, False)
+
+
+def test_routing_flags_are_refused_where_they_would_be_dropped(tmp_path, monkeypatch):
+    pf = tmp_path / "p.md"
+    pf.write_text("x")
+    for spec in ("S=%s+shop+legacy", "A=%s+anyprice+legacy"):      # the legacy decision has no shop or price routing
+        with pytest.raises(ValueError):
+            R.parse_arm(spec % pf)
+    monkeypatch.setattr(R, "PF", None)      # a build without page-fact rules (the unchanged baseline)
+    with pytest.raises(ValueError):
+        R.Arm("A", PROMPT, anyprice=True)
+    assert R.Arm("OLD", PROMPT).anyprice is False      # a plain arm still builds
+
+
+def test_duplicate_arm_names_are_refused(tmp_path):
+    with pytest.raises(ValueError):
+        run(tmp_path, [], Fake(lambda m, c: answer("benign")), [CHANGED, R.Arm("CHANGED", PROMPT, anyprice=True)])
 
 
 # ---------------------------------------------------------------- +anyprice: any price amount routes a Haiku pass to Sonnet

@@ -213,7 +213,7 @@ def make_server(client, port, page_html=None, open_urls=False, bind="127.0.0.1",
             if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
                 return self._json(415, {"error": "bad_content_type"})
             n = self.headers.get("Content-Length", "")
-            if not n.isdigit() or int(n) > BODY_CAP:
+            if not (n.isascii() and n.isdigit()) or int(n) > BODY_CAP:      # "²".isdigit() is True but int("²") raises
                 return self._json(400, {"error": "bad_request"})
             try:
                 obj = json.loads(self.rfile.read(int(n)))
