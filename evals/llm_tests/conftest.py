@@ -6,7 +6,7 @@ Environment (all optional)
   LLMURL_EVAL_KEY_FILE    key file; LLMURL_EVAL_LEDGER the shared ledger; LLMURL_EVAL_RUN_CAP (USD, default 1.50) and LLMURL_EVAL_GRAND_CAP the caps
   LLMURL_EVAL_OUT         optional jsonl: one line per case (ids, expected, decisions, reasons, cost; no page text)
   LLMURL_EVAL_PROMPT      optional path to a prompt file the arm uses instead of the service's pinned prompt (judge.load_prompt());
-                          test only, e.g. LLMURL_EVAL_PROMPT=llm_url_scan/prompts/prompt-v5.md. The service itself always loads prompt-v3.
+                          test only, e.g. LLMURL_EVAL_PROMPT=llm_url_scan/prompts/prompt-v3.md. The service itself always loads prompt-v5.
   LLMURL_SHOP_ROUTING     1 = the arm also routes price-and-cart pages to Sonnet; anything else = what the service ships (off)
   LLMURL_EVAL_ANYPRICE    1 = the arm routes every page showing a price amount to Sonnet (harness only, a superset of shop routing); else off
 Prints counts and ids only. Existence of the key file is checked here; it is read only when the first case runs.

@@ -33,7 +33,7 @@ def test_contract_pass_answer(make):
     assert (body["decision"], body["reason"], body["advisory"], body["readable"]) == ("pass", "pass_haiku", True, True)
     assert body["models_run"] == [H] and body["sonnet"] is None and body["web_risk_d0"] == "negative"
     assert body["haiku"]["state"] == "PASS" and body["d1a"] == {"state": "PASS", "routed_because": None}
-    assert body["prompt_sha256"] == "1c7b2bbe7e1e8c296f7b0db4dc32b51a17dfa6ea46b67592d0c3962a865c49d7"
+    assert body["prompt_sha256"] == "7886b515bee22ee28fa73b3ed850d0c957a8db4abf61e0d46dd9fefe9d9ea9c8"
     for secret in (ADDR, HOST, MARKER, "Zq81vKQ"):
         assert secret not in r.text
 
