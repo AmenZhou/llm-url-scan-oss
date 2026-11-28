@@ -33,7 +33,7 @@ def test_contract_pass_answer(make):
     assert (body["decision"], body["reason"], body["advisory"], body["readable"]) == ("pass", "pass_haiku", True, True)
     assert body["models_run"] == [H] and body["sonnet"] is None and body["web_risk_d0"] == "negative"
     assert body["haiku"]["state"] == "PASS" and body["d1a"] == {"state": "PASS", "routed_because": None}
-    assert body["prompt_sha256"] == "1c7b2bbe7e1e8c296f7b0db4dc32b51a17dfa6ea46b67592d0c3962a865c49d7"
+    assert body["prompt_sha256"] == "7886b515bee22ee28fa73b3ed850d0c957a8db4abf61e0d46dd9fefe9d9ea9c8"
     for secret in (ADDR, HOST, MARKER, "Zq81vKQ"):
         assert secret not in r.text
 
@@ -142,14 +142,14 @@ def test_deadline_504(make, monkeypatch):
 
 # ---------------------------------------------------------------- D1a routing
 @pytest.mark.parametrize("reason", ["gone", "site_blocked", "proxy_refused", "other"])
-def test_policy_a_unreadable_is_a_hold_with_no_model_call(make, reason):
+def test_unreadable_is_could_not_scan_with_no_model_call(make, reason):
     st = make(capture=StubCapture({ADDR: unreadable(reason, "dns" if reason == "gone" else None)}))
     body = scan(api(st), st).json()
-    assert (body["decision"], body["reason"], body["readable"], body["unreadable_reason"]) == ("hold", "unreadable_" + reason, False, reason)
+    assert (body["decision"], body["reason"], body["readable"], body["unreadable_reason"]) == ("could_not_scan", "unreadable_" + reason, False, reason)
     assert body["models_run"] == [] and body["haiku"] is None and body["d1a"]["state"] == "UNREAD" and body["cost_usd"] == 0.0
     assert st.client.calls == [] and st.svc.ledger.spent() == (0.0, 0.0)
     (ev,) = st.log_events()
-    assert (ev["decision"], ev["reason"], ev["d1a_state"], ev["unreadable_reason"]) == ("hold", "unreadable_" + reason, "UNREAD", reason)
+    assert (ev["decision"], ev["reason"], ev["d1a_state"], ev["unreadable_reason"]) == ("could_not_scan", "unreadable_" + reason, "UNREAD", reason)
 
 
 def test_haiku_answer_is_logged_beside_d1a(make):
@@ -288,7 +288,7 @@ def test_recheck6_logs_the_second_look_and_leaves_the_first_decision(make):
     st.client.script[H] = [resp(answer())]
     assert asyncio.run(st.svc.recheck6(ADDR, hid, ver)) is True
     first, second = st.log_events()
-    assert first["decision"] == "hold" and first["reason"] == "unreadable_gone"
+    assert first["decision"] == "could_not_scan" and first["reason"] == "unreadable_gone"
     assert second == {**second, "event": "recheck6", "hid": hid, "r6_skipped": False, "r6_readable": True, "r6_h_state": "PASS", "r6_d1a_state": "PASS"}
     assert second["r6_cost_usd"] == pytest.approx(0.00025) and st.svc.ledger.spent()[0] == pytest.approx(0.00025)
 
@@ -311,3 +311,64 @@ def test_the_store_holds_the_address_sealed_and_the_scheduler_key_reads_it(make)
     sched = RecheckStore(st.cfg.data_dir / "recheck.sqlite", private=st.private)
     assert sched.read(hid, ver) == ADDR
     assert b"brandx" not in (st.cfg.data_dir / "recheck.sqlite").read_bytes()
+
+
+# ---------------------------------------------------------------- could_not_scan (page facts) and shop routing
+LURE = "Your account is locked. Enter your card number and PIN to restore access. "
+CNS_PAGES = {
+    "page_empty": page(text="", meta=""),
+    "page_error": page(text=LURE, meta="title: Error 404"),                       # a credential lure on an error page is still never a pass
+    "page_bot_wall": page(text="Just a moment while we check your browser. " + LURE),
+    "page_parked": page(text="This domain is parked. " + LURE),
+    "page_download": page(text="", meta="title: \nhttp_status: 200\nredirects: 0\ndownload: yes (.exe)"),
+}
+
+
+@pytest.mark.parametrize("why", sorted(CNS_PAGES))
+def test_page_facts_give_could_not_scan_and_no_model_runs_even_if_models_would_pass(make, why):
+    st = make(client=FakeClient(haiku=[resp(answer("benign"))], sonnet=[resp(answer("benign"))]), capture=StubCapture({ADDR: CNS_PAGES[why]}))
+    body = scan(api(st), st).json()
+    assert (body["decision"], body["reason"], body["readable"]) == ("could_not_scan", why, True)
+    assert body["models_run"] == [] and body["haiku"] is None and body["sonnet"] is None and body["cost_usd"] == 0.0
+    assert body["d1a"] == {"state": "UNREAD", "routed_because": None}
+    assert st.client.calls == [] and st.svc.ledger.spent() == (0.0, 0.0) and st.svc.log.rejected == 0
+    (ev,) = st.log_events()
+    assert (ev["decision"], ev["reason"], ev["d1a_state"]) == ("could_not_scan", why, "UNREAD")
+    assert st.svc.store.rows()[0][3] is not None      # enters the 6 h recheck
+
+
+def test_recheck6_of_a_could_not_scan_page_is_log_only_and_runs_the_detector_again(make):
+    st = make(capture=StubCapture({ADDR: CNS_PAGES["page_empty"]}))
+    scan(api(st), st)
+    hid, ver = st.svc.store.rows()[0][:2]
+    assert asyncio.run(st.svc.recheck6(ADDR, hid, ver)) is True
+    first, second = st.log_events()
+    assert first["decision"] == "could_not_scan" and second["event"] == "recheck6"
+    assert (second["r6_skipped"], second["r6_readable"], second["r6_d1a_state"], second["r6_cost_usd"]) == (False, True, "UNREAD", 0)
+    assert st.client.calls == [] and st.svc.log.rejected == 0
+
+
+def test_shop_page_pass_goes_to_sonnet_and_a_plain_page_does_not(make):
+    shop = LONG_TEXT + " Wireless mouse $19.99. Add to cart."
+    st = make(client=FakeClient(haiku=[resp(answer())], sonnet=[resp(answer("phishing", quotes=[MARKER], rules=["R1"]))]), capture=StubCapture({ADDR: page(text=shop)}), shop_routing=True)
+    body = scan(api(st), st).json()
+    assert (body["decision"], body["reason"], body["d1a"]["routed_because"]) == ("hold", "hold_sonnet_verdict", "shop_page")
+    assert st.client.models_called() == [H, S] and st.svc.log.rejected == 0 and st.log_events()[0]["s_routed_because"] == "shop_page"
+    st = make(client=FakeClient(haiku=[resp(answer())], sonnet=[resp(answer())]), capture=StubCapture({ADDR: page(text=shop)}), shop_routing=True)
+    assert scan(api(st), st).json()["reason"] == "pass_sonnet_confirmed_shop"
+    for text in (LONG_TEXT, LONG_TEXT + " Wireless mouse $19.99.", LONG_TEXT + " Add to cart."):
+        st = make(client=FakeClient(haiku=[resp(answer())]), capture=StubCapture({ADDR: page(text=text)}), shop_routing=True)
+        assert (scan(api(st), st).json()["reason"], st.client.models_called()) == ("pass_haiku", [H])
+
+
+def test_flags_off_restore_the_old_behaviour(make):
+    st = make(capture=StubCapture({ADDR: unreadable("gone", "dns")}), could_not_scan=False)
+    body = scan(api(st), st).json()
+    assert (body["decision"], body["reason"]) == ("hold", "unreadable_gone") and st.svc.store.rows()[0][3] is not None
+    st = make(client=FakeClient(haiku=[resp(answer())], sonnet=[resp(answer())]), capture=StubCapture({ADDR: CNS_PAGES["page_empty"]}), could_not_scan=False)
+    assert scan(api(st), st).json()["decision"] != "could_not_scan" and st.client.models_called()[0] == H
+    st = make(client=FakeClient(haiku=[resp(answer())], sonnet=[resp(answer())]), capture=StubCapture({ADDR: CNS_PAGES["page_download"]}), could_not_scan=False)
+    assert scan(api(st), st).json()["decision"] != "could_not_scan" and st.client.models_called()[0] == H      # the download-only link goes to the models
+    shop = LONG_TEXT +" Wireless mouse $19.99. Add to cart."
+    st = make(client=FakeClient(haiku=[resp(answer())]), capture=StubCapture({ADDR: page(text=shop)}))      # shop routing is off by default
+    assert (scan(api(st), st).json()["reason"], st.client.models_called()) == ("pass_haiku", [H])

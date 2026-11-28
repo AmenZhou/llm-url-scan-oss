@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>llm-url-scan demo</title>
+<style nonce="__NONCE__">
+:root { color-scheme: light dark; --bg:#fafaf7; --fg:#1d1d1b; --muted:#5d5d57; --card:#fff; --line:#d8d8d0; --accent:#1f5fbf; --pass:#1b6e3c; --hold:#a4331f; --warn:#fff4d6; --warnfg:#5c4300; --ok:#e3f4ea; --bad:#fbe6e1; }
+@media (prefers-color-scheme: dark) { :root { --bg:#161715; --fg:#ecece6; --muted:#a2a29a; --card:#20211f; --line:#3a3b37; --accent:#7fb0ff; --pass:#6fd199; --hold:#ff9a86; --warn:#3a3016; --warnfg:#f0d48a; --ok:#17301f; --bad:#3a1e18; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, sans-serif; }
+main { max-width:1000px; margin:0 auto; padding:16px; }
+h1 { font-size:1.6rem; margin:.4em 0 .2em; }
+h2 { font-size:1.15rem; margin:1.4em 0 .2em; }
+.muted { color:var(--muted); font-size:.92rem; margin:0; }
+.lead { margin:.2em 0 .8em; }
+.note { background:var(--warn); color:var(--warnfg); border-radius:8px; padding:10px 14px; margin:12px 0; }
+.note p { margin:.3em 0; }
+#status { position:sticky; top:0; z-index:1; background:var(--bg); padding:8px 0; border-bottom:1px solid var(--line); font-weight:600; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+#score { font-weight:400; color:var(--muted); }
+.box { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; display:flex; flex-direction:column; gap:8px; }
+.row { display:flex; gap:8px; flex-wrap:wrap; }
+label { font-weight:600; }
+input[type=text] { flex:1 1 320px; min-width:0; font:inherit; padding:9px 11px; border-radius:8px; border:1px solid var(--line); background:var(--bg); color:var(--fg); }
+button { font:inherit; padding:8px 16px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; align-self:flex-start; }
+@media (prefers-color-scheme: dark) { button { color:#10131a; } }
+button:disabled { opacity:.5; cursor:not-allowed; }
+:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:14px; padding:0; margin:10px 0; list-style:none; }
+.card h3 { font-size:1.05rem; margin:0; }
+.card .url { margin:0; }
+code { word-break:break-all; font-size:.84rem; color:var(--accent); }
+.design { font-size:.92rem; margin:0; }
+.res { border-top:1px solid var(--line); padding-top:8px; font-size:.95rem; display:flex; flex-direction:column; gap:6px; }
+.res:empty { display:none; }
+.res p { margin:0; }
+.verdict { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.badge { display:inline-block; font-weight:800; font-size:1.05rem; padding:1px 14px; border-radius:99px; border:2px solid currentColor; }
+.pass { color:var(--pass); } .hold, .could_not_scan { color:var(--hold); }
+.verdict-note { padding:6px 10px; border-radius:6px; font-weight:600; }
+.verdict-note.yes { background:var(--ok); color:var(--pass); }
+.verdict-note.no { background:var(--bad); color:var(--hold); }
+.finds { margin:0; padding-left:1.2em; }
+details { margin-top:2px; }
+pre { white-space:pre-wrap; word-break:break-word; font-size:.8rem; background:var(--bg); border:1px solid var(--line); padding:8px; border-radius:6px; max-height:260px; overflow:auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>llm-url-scan: live demo</h1>
+  <p class="muted lead">Paste a URL, or scan a sample. The real service opens the page in an isolated browser and asks a real model whether it looks like phishing. The answer is advisory only: it blocks nothing.</p>
+  <div class="note">
+    <p><strong>Every scan calls the real Anthropic API</strong>, about USD 0.01 each (a little more when the second model also runs). Pages that cannot be read cost nothing.</p>
+    <p id="mode-note"></p>
+  </div>
+  <div id="status" role="status" aria-live="polite"><span id="status-text">Ready. One scan runs at a time.</span><span id="score"></span></div>
+
+  <section class="box" id="try" aria-labelledby="try-h">
+    <h2 id="try-h">Scan a URL</h2>
+    <label for="url">Paste a URL</label>
+    <div class="row">
+      <input id="url" type="text" inputmode="url" autocomplete="off" spellcheck="false" maxlength="2048" placeholder="https://example.com/">
+      <button id="go" type="button">Scan URL</button>
+    </div>
+    <div class="res" aria-live="polite"></div>
+  </section>
+
+  <h2 id="samples-h">Sample URLs</h2>
+  <p class="muted" id="samples-sub"></p>
+  <ul class="grid" id="grid"></ul>
+</main>
+<script nonce="__NONCE__">
+"use strict";
+var REASONS = {
+  pass_haiku: "The first model found nothing suspicious.",
+  pass_sonnet_confirmed_short: "A short page: the first model passed it and the second model agreed.",
+  hold_haiku_cannot_tell: "The first model could not tell.",
+  hold_sonnet_cannot_tell: "The second model could not tell, so the page is held.",
+  hold_sonnet_verdict: "The first model held the page and the second model agreed.",
+  unreadable_gone: "The page is gone (not found), so nothing could be judged.",
+  unreadable_site_blocked: "The site blocked the browser, so nothing could be judged.",
+  unreadable_proxy_refused: "The egress proxy refused the address.",
+  unreadable_other: "The page did not answer in time, so nothing could be judged.",
+  page_empty: "The page shows nothing to judge, so no model ran.",
+  page_error: "The page is an error page, so no model ran.",
+  page_bot_wall: "The page is a bot wall, so no model ran.",
+  page_parked: "The page is a parked or suspended site, so no model ran.",
+  pass_sonnet_confirmed_shop: "A shop page: the second model looked and agreed."
+};
+var RULES = {
+  R1: "asks for a password, card number, code or other credential",
+  R2: "names or imitates another organisation's brand",
+  R3: "sends form data to another host or by script",
+  R4: "uses pressure wording (suspended, prize, parcel fee)",
+  R5: "has a look-alike web address",
+  R6: "uses evasion tricks (decoded or hidden page, bot wall)",
+  R7: "could not be read, so the models cannot tell"
+};
+var NOANSWER = {
+  busy: "another scan is running.",
+  not_allowed_in_this_mode: "this demo only scans its own sample pages. Start the server with --open-urls (see demo/README.md) to scan other URLs.",
+  bad_request: "that is not a valid http or https address."
+};
+var statusText = document.getElementById("status-text"), scoreEl = document.getElementById("score"), grid = document.getElementById("grid");
+var urlBox = document.getElementById("url"), goBtn = document.getElementById("go"), tryBox = document.getElementById("try");
+var buttons = [goBtn], tally = { done: 0, designed: 0, match: 0 };
+
+function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+function reasonText(code) {
+  if (!code) return "";
+  if (REASONS[code]) return REASONS[code];
+  return code.indexOf("hold_") === 0 ? "A model held the page (code " + code + ")." : "Code " + code + ".";
+}
+function setBusy(b, msg) { buttons.forEach(function (x) { x.disabled = b; }); statusText.textContent = msg; }
+function modelName(id) { return id.indexOf("haiku") >= 0 ? "Haiku" : id.indexOf("sonnet") >= 0 ? "Sonnet" : id; }
+
+function show(holder, r) {
+  var box = holder.querySelector(".res"); box.textContent = "";
+  var v = el("div", "verdict");
+  v.appendChild(el("span", "badge " + r.decision, r.decision.toUpperCase()));
+  var cost = r.answer && typeof r.answer.cost_usd === "number" ? " · cost USD " + r.answer.cost_usd.toFixed(4) : "";
+  v.appendChild(el("span", "muted", (r.latency_ms / 1000).toFixed(1) + " s" + cost));
+  box.appendChild(v);
+  box.appendChild(el("p", "", reasonText(r.reason)));
+  var f = r.flags, ran = (f.models_run || []).map(modelName);
+  box.appendChild(el("p", "muted", f.readable ? (ran.length ? "Page read. Judged by " + ran.join(", then ") + "." : "Page read.") : "Page not read; no model ran."));
+  if (f.rules && f.rules.length) {
+    var ul = el("ul", "finds");
+    f.rules.forEach(function (c) { ul.appendChild(el("li", "", c + ": the page " + (RULES[c] || "matched this rule") + ".")); });
+    box.appendChild(ul);
+  }
+  if (f.injection_text) box.appendChild(el("p", "", "A model flagged hidden instructions aimed at the reviewer in the page text."));
+  if (r.expected) {
+    var yes = r.matched === true;
+    box.appendChild(el("p", "verdict-note " + (yes ? "yes" : "no"), yes ? "Matches the design (" + r.expected.decision + ")." : "Differs from the design: expected " + r.expected.decision + ". " + r.expected.why));
+  } else {
+    box.appendChild(el("p", "muted", "No designed outcome for this URL: this is just the service's answer."));
+  }
+  var d = el("details"); d.appendChild(el("summary", "", "Raw answer"));
+  d.appendChild(el("pre", "", JSON.stringify(r.answer, null, 2))); box.appendChild(d);
+}
+
+function updateScore(r, sample) {
+  if (!sample || !r.expected) return;
+  tally.done += 1; tally.match += r.matched === true ? 1 : 0;
+  scoreEl.textContent = tally.match + " of " + tally.done + " samples matched their design";
+}
+
+// body: {id: ...} or {url: ...}; holder: the element whose .res shows the answer; sample: true for the sample rows
+function run(body, label, holder, sample) {
+  var box = holder.querySelector(".res"); box.textContent = "";
+  setBusy(true, "Scanning " + label + " … this can take up to a minute.");
+  fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+    .then(function (resp) { return resp.json().then(function (j) { return { ok: resp.ok, j: j }; }); })
+    .then(function (x) {
+      if (x.ok) { show(holder, x.j); updateScore(x.j, sample); setBusy(false, "Done: " + label + " was " + x.j.decision + (x.j.matched === true ? ", as designed." : x.j.matched === false ? ", not as designed." : ".")); }
+      else { box.appendChild(el("p", "hold", "No answer: " + (NOANSWER[x.j.error] || "the service did not give a verdict (" + (x.j.service_code || x.j.error) + ")."))); setBusy(false, "The scan did not complete."); }
+    })
+    .catch(function () { box.appendChild(el("p", "hold", "No answer: the demo server could not be reached.")); setBusy(false, "The scan did not complete."); });
+}
+
+goBtn.addEventListener("click", function () {
+  var u = urlBox.value.trim();
+  if (!u) { statusText.textContent = "Paste a URL first."; urlBox.focus(); return; }
+  run({ url: u }, "your URL", tryBox, false);
+});
+urlBox.addEventListener("keydown", function (e) { if (e.key === "Enter" && !goBtn.disabled) goBtn.click(); });
+
+// One row per sample: its title, address and designed outcome, a Scan button, and its own answer area.
+function addSample(s) {
+  var li = el("li", "box card");
+  li.appendChild(el("h3", "", s.title));
+  if (s.what) li.appendChild(el("p", "muted", s.what));
+  var u = el("p", "url"); u.appendChild(el("code", "", s.url)); li.appendChild(u);
+  if (s.expected) { var d = el("p", "design"); d.appendChild(el("strong", "", "Designed outcome: ")); d.appendChild(document.createTextNode(s.expected.decision + ". " + s.expected.why)); li.appendChild(d); }
+  var b = el("button", "", "Scan"); b.type = "button"; b.setAttribute("aria-label", "Scan sample: " + s.title);
+  b.addEventListener("click", function () { urlBox.value = s.url; run({ url: s.url }, "“" + s.title + "”", li, true); });
+  buttons.push(b); li.appendChild(b);
+  var res = el("div", "res"); res.setAttribute("aria-live", "polite"); li.appendChild(res);
+  grid.appendChild(li);
+}
+
+fetch("/api/pages").then(function (r) { return r.json(); }).then(function (j) {
+  document.getElementById("mode-note").textContent = j.open
+    ? "Open mode: any http or https URL you paste is fetched in the isolated browser, and the full address goes to Anthropic and to Google Web Risk. Do not paste an address you would not want to share."
+    : "Sample mode: only the ten made-up pages below can be scanned, inside a local test network. Nothing on the internet is fetched, and a pasted real URL is refused.";
+  document.getElementById("samples-sub").textContent = j.open
+    ? "Two harmless real pages. Scan fills the box above with the address."
+    : "Made-up pages with invented brands. Each shows the outcome it was designed for; a design is not a guarantee, and ten pages say nothing about accuracy.";
+  (j.open ? j.samples : j.pages).forEach(addSample);
+}).catch(function () { statusText.textContent = "Could not load the sample list."; });
+</script>
+</body>
+</html>

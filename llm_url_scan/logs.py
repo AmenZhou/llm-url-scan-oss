@@ -13,9 +13,9 @@ DETAILS = ("deadline", "name_blocked", "numeric_host", "literal_blocked", "resol
 RANGE_CLASSES = ("private", "loopback_or_unspecified", "link_local_or_metadata", "reserved_or_doc", "own_or_extra", "v6_other")
 DECISION_REASONS = ("unreadable_gone", "unreadable_site_blocked", "unreadable_proxy_refused", "unreadable_other", "pass_haiku",
                     "pass_sonnet_confirmed_short", "pass_sonnet_overrode_hold", "pass_sonnet_resolved", "hold_sonnet_verdict",
-                    "hold_sonnet_cannot_tell", "hold_sonnet_failed")
+                    "hold_sonnet_cannot_tell", "hold_sonnet_failed", "pass_sonnet_confirmed_shop", "page_empty", "page_error", "page_bot_wall", "page_parked", "page_download")
 STATES = ("PASS", "HOLD", "CANNOT", "UNREAD")
-ROUTES = ("h_hold", "h_cannot", "h_failed", "short_pass")
+ROUTES = ("h_hold", "h_cannot", "h_failed", "short_pass", "shop_page")
 WR_STATES = ("positive", "negative", "error", "not_checked")
 MODELS = ("claude-haiku-5-5", "claude-sonnet-5-5")
 OUTCOMES = ("PASS", "HOLD", "CAPTURE", "FAILED", "ERROR")
@@ -42,7 +42,7 @@ _P = lambda rx: ("pat", rx)      # noqa: E731
 _MODEL_FIELDS = {"model": E(*MODELS), "outcome": E(*OUTCOMES), "reason": E(*MODEL_REASONS), "verdict": E(*VERDICT_VALUES), "state": E("PASS", "HOLD", "CANNOT"),
                  "rules": ("rules",), "brand_present": _B, "injection": _B, "quotes_total": _N, "quotes_matched": _N, "rule_without_quote": _B,
                  "stop_reason": E(*STOP), "in_tok": _N, "out_tok": _N, "cost_usd": _X, "latency_s": _X, "request_id": _P(_REQID)}
-_SCAN = {"hid": _H, "salt_ver": _N, "caller": _P(_CALLER), "decision": E("pass", "hold"), "reason": E(*DECISION_REASONS), "readable": _B,
+_SCAN = {"hid": _H, "salt_ver": _N, "caller": _P(_CALLER), "decision": E("pass", "hold", "could_not_scan"), "reason": E(*DECISION_REASONS), "readable": _B,
          "unreadable_reason": E(*UNREAD_REASONS), "unreadable_detail": E(*DETAILS), "range_class": E(*RANGE_CLASSES), "capture_ms": _N, "tries": _N,
          "redirects": _N, "http_status_class": E("2xx", "3xx", "4xx", "5xx"), "text_chars": _N, "truncated": _B, "short": _B, "empty_page": _B,
          "forms": _N, "s_routed_because": E(*ROUTES), "d1a_state": E(*STATES), "p05": E(0, 1), "p12": E(0, 1), "p13": E(0, 1),

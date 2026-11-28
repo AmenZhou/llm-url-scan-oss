@@ -15,13 +15,15 @@ from .logs import VOCAB, check_text
 DECISION_4 = "No person reviews pages: Web Risk on day 0 and day 7 is the only independent signal."
 RULES = (
     "1. False holds are an upper bound apart from Web Risk listing errors: no person labels pages, so a hold that Web Risk does not list "
-    "is unconfirmed, never false; the false-hold share is at most unconfirmed holds divided by readable pages, printed per caller "
+    "is unconfirmed, never false; the false-hold share is at most unconfirmed holds divided by pages a model judged, printed per caller "
     "above; it is not a false-positive rate.",
     "2. Catch beyond Web Risk is not shown: a hold that Web Risk lacks is not a catch; the report states agreement with Web Risk, not accuracy.",
     "3. Web Risk positive means the address is listed; negative does not mean safe; day 0 can come before a listing, "
     "day 7 is the better independent signal and is still incomplete.",
-    "4. Unreadable pages are held by policy; they are counted apart, and the hold rate is printed with and without them.",
-    "5. No outside reference figures are printed in this report; overlaps use readable pages only, and unreadable holds have their own block.",
+    "4. Unreadable pages and readable pages with nothing to judge answer could_not_scan (older logs hold unreadable pages); "
+    "they are counted apart; the hold rate is printed over all calls answered, and over judged pages without unreadable ones.",
+    "5. No outside reference figures are printed in this report; overlaps, per-caller shares, cost and Sonnet share count only pages a model judged "
+    "(readable, not could_not_scan); unreadable pages have their own block.",
     "6. No percentage is printed for a group under 30 pages; counts only.",
     "7. Agreement of the judge with Web Risk is consistent, not independent.",
     "8. Ids are counted per salt version; one address scanned under two versions counts twice.",
@@ -33,7 +35,7 @@ LABELS = ("llm-url-scan weekly counts report week volume calls answered refusals
           "web_risk d0 d7 pending overlaps unconfirmed misses alone patterns injection truncated recheck6 rechecked skipped became decidable "
           "cost spend_usd per_1000_readable_usd sonnet_share_readable spend_cap_refusals latency median p95 capture_s haiku_s sonnet_s total_s "
           "health breaker salt_ver api_error outage n/a reading rules p05 p12 p13 p15 distinct ids of upper bound not a false-positive rate "
-          "caller unreadable_holds")
+          "caller unreadable_holds all judged still scannable")
 REPORT_VOCAB = VOCAB | {w.strip("[](),:;|") for w in (LABELS + " " + DECISION_4 + " " + " ".join(RULES)).split()}
 
 
@@ -72,6 +74,7 @@ def build(events, year, week):
 
     readable = [s for s in scans if s["readable"]]
     unread = [s for s in scans if not s["readable"]]
+    judged = [s for s in readable if s.get("h_state")]      # pages a model judged (pass or hold); could_not_scan pages and old unreadable holds have no model state
     holds = [s for s in scans if s["decision"] == "hold"]
     say("llm-url-scan weekly counts report week", year, week)
     say(DECISION_4)
@@ -99,10 +102,14 @@ def build(events, year, week):
     say("[d1a]")
     tally("d1a decision", scans, "decision")
     tally("d1a holds reason", holds, "reason")
-    say("d1a holds excluding unreadable", len(holds) - len(unread))
+    model_holds = [s for s in holds if not s["reason"].startswith("unreadable_")]      # old logs hold unreadable pages; new ones answer could_not_scan
+    cns = [s for s in scans if s["decision"] == "could_not_scan"]
+    say("d1a holds excluding unreadable", len(model_holds))
+    say("could_not_scan", len(cns))
+    tally("could_not_scan reason", cns, "reason")
     say("hold_sonnet_failed api_error outage", sum(s["reason"] == "hold_sonnet_failed" and s.get("s_reason") == "api_error" for s in scans))
-    say("hold_rate with unreadable", _pct(len(holds), len(scans)))
-    say("hold_rate without unreadable", _pct(len(holds) - len(unread), len(readable)))
+    say("hold_rate of all calls answered", _pct(len(holds), len(scans)))      # holds over every answer, could_not_scan and unreadable included in the denominator
+    say("hold_rate of judged without unreadable", _pct(len(model_holds), len(judged)))
 
     say("[web_risk]")
     tally("web_risk d0", scans, "wr_d0")
@@ -110,29 +117,29 @@ def build(events, year, week):
         say("web_risk d7", v, sum(d7.get(key(s)) == v for s in scans))
     say("web_risk d7 pending", sum(key(s) not in d7 for s in scans))
 
-    say("[overlaps]")      # readable pages only
+    say("[overlaps]")      # judged readable pages only: a could_not_scan page is neither a hold nor a miss
     pos0 = lambda s: s.get("wr_d0") == "positive"          # noqa: E731
     pos7 = lambda s: d7.get(key(s)) == "positive"          # noqa: E731
     unconfirmed = lambda s: s["decision"] == "hold" and not pos0(s) and not pos7(s)      # noqa: E731
     for who, is_hold in (("d1a", lambda s: s["decision"] == "hold"), ("haiku alone", lambda s: s.get("h_state") != "PASS")):
-        say(who, "hold web_risk d0 positive", sum(is_hold(s) and pos0(s) for s in readable))
-        say(who, "hold web_risk d7 positive", sum(is_hold(s) and pos7(s) for s in readable))
-        say(who, "unconfirmed holds", sum(is_hold(s) and not pos0(s) and not pos7(s) for s in readable))
-        say(who, "misses pass web_risk positive", sum(not is_hold(s) and (pos0(s) or pos7(s)) for s in readable))
-    for c in sorted({s["caller"] for s in readable}):      # rule 1 with its denominator, per caller
-        rc = [s for s in readable if s["caller"] == c]
+        say(who, "hold web_risk d0 positive", sum(is_hold(s) and pos0(s) for s in judged))
+        say(who, "hold web_risk d7 positive", sum(is_hold(s) and pos7(s) for s in judged))
+        say(who, "unconfirmed holds", sum(is_hold(s) and not pos0(s) and not pos7(s) for s in judged))
+        say(who, "misses pass web_risk positive", sum(not is_hold(s) and (pos0(s) or pos7(s)) for s in judged))
+    for c in sorted({s["caller"] for s in judged}):      # rule 1 with its denominator, per caller
+        rc = [s for s in judged if s["caller"] == c]
         n = sum(unconfirmed(s) for s in rc)
-        say("caller", c, "unconfirmed holds", n, "of", len(rc), "readable", _pct(n, len(rc)), "upper bound not a false-positive rate")
-    say("[unreadable_holds]")
-    say("unreadable_holds", len(unread), "web_risk d0 positive", sum(pos0(s) for s in unread), "web_risk d7 positive", sum(pos7(s) for s in unread))
+        say("caller", c, "unconfirmed holds", n, "of", len(rc), "judged", _pct(n, len(rc)), "upper bound not a false-positive rate")
+    say("[unreadable]")      # could_not_scan on new logs, hold on old ones: either way not a verdict
+    say("unreadable", len(unread), "web_risk d0 positive", sum(pos0(s) for s in unread), "web_risk d7 positive", sum(pos7(s) for s in unread))
 
     say("[patterns]")
     for p in ("p05", "p12", "p13"):
         hit = [s for s in scans if s.get(p) == 1]
-        say(p, len(hit), "holds", sum(s["decision"] == "hold" for s in hit))
+        say(p, len(hit), "holds", sum(s["decision"] == "hold" for s in hit), "could_not_scan", sum(s["decision"] == "could_not_scan" for s in hit))
     for v in ("under40", "thin", "longer"):
         hit = [s for s in scans if s.get("p15") == v]
-        say("p15", v, len(hit), "holds", sum(s["decision"] == "hold" for s in hit))
+        say("p15", v, len(hit), "holds", sum(s["decision"] == "hold" for s in hit), "could_not_scan", sum(s["decision"] == "could_not_scan" for s in hit))
 
     say("[injection]")
     say("haiku PASS injection", sum(s.get("h_state") == "PASS" and s.get("h_injection") is True for s in scans))
@@ -141,19 +148,20 @@ def build(events, year, week):
     say("d1a pass truncated", sum(s["decision"] == "pass" and s.get("truncated") is True for s in scans))
 
     say("[recheck6]")
-    first = [s for s in scans if s["reason"].startswith("unreadable_") or s["reason"] == "hold_sonnet_cannot_tell"]
+    first = [s for s in scans if s["decision"] == "could_not_scan" or s["reason"].startswith("unreadable_") or s["reason"] == "hold_sonnet_cannot_tell"]
     done = [r6[key(s)] for s in first if key(s) in r6 and not r6[key(s)]["r6_skipped"]]
     say("recheck6 rechecked", len(done), "skipped", sum(key(s) in r6 and r6[key(s)]["r6_skipped"] for s in first),
         "pending", sum(key(s) not in r6 for s in first))
     say("recheck6 became readable", sum(r.get("r6_readable") is True for r in done))
     say("recheck6 became decidable", sum(r.get("r6_d1a_state") in ("PASS", "HOLD") for r in done))
-    say("recheck6 pass", sum(r.get("r6_d1a_state") == "PASS" for r in done), "hold", sum(r.get("r6_d1a_state") != "PASS" for r in done))
+    say("recheck6 pass", sum(r.get("r6_d1a_state") == "PASS" for r in done), "hold", sum(r.get("r6_d1a_state") in ("HOLD", "CANNOT") for r in done),      # CANNOT: Sonnet still cannot tell or failed, a hold
+        "still not scannable", sum(r.get("r6_d1a_state") == "UNREAD" for r in done))
 
     say("[cost]")
     spent = sum(s.get("cost_usd", 0) for s in scans) + sum(r.get("r6_cost_usd", 0) for r in done)
     say("cost spend_usd", "%.4f" % spent)
-    say("cost per_1000_readable_usd", "%.4f" % (1000 * sum(s.get("cost_usd", 0) for s in readable) / len(readable)) if readable else "n/a")
-    say("cost sonnet_share_readable", _pct(sum(bool(s.get("s_routed_because")) for s in readable), len(readable)))
+    say("cost per_1000_readable_usd", "%.4f" % (1000 * sum(s.get("cost_usd", 0) for s in judged) / len(judged)) if judged else "n/a")
+    say("cost sonnet_share_readable", _pct(sum(bool(s.get("s_routed_because")) for s in judged), len(judged)))
     say("cost spend_cap_refusals", sum(e["event"] == "refusal" and e["code"] == "spend_cap" for e in wk))
 
     say("[latency]")

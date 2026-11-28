@@ -131,6 +131,8 @@ services:
       LLMURL_TOTAL_CAP_USD: ${LLMURL_TOTAL_CAP_USD:-20.0}
       LLMURL_RUN_CAP_USD: ${LLMURL_RUN_CAP_USD:-}
       LLMURL_RUN_START: ${LLMURL_RUN_START:-}
+      LLMURL_COULD_NOT_SCAN: ${LLMURL_COULD_NOT_SCAN:-1}
+      LLMURL_SHOP_ROUTING: ${LLMURL_SHOP_ROUTING:-0}
       # LLMURL_TEST_MODE is deliberately NOT passed through from the shell: only docker-compose.test.yml sets it.
     volumes:
       - ${LLMURL_DATA_DIR:-./data}:/data

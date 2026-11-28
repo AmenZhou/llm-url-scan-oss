@@ -12,6 +12,18 @@ EMPTY = {"outcome": "CAPTURE", "reason": "empty_page"}
 FAILED = {"outcome": "FAILED", "reason": "max_tokens"}
 ERROR = {"outcome": "ERROR", "reason": "api_error"}
 
+def test_shop_route_only_for_a_long_haiku_pass():
+    assert routed_because(PASS, False, True) == "shop_page"
+    assert routed_because(PASS, False, False) is None
+    assert routed_because(PASS, True, True) == "short_pass"      # short wins
+    assert routed_because(HOLD, False, True) == "h_hold"         # a hold keeps its own route
+    assert decide(PASS, PASS, False, True)["reason"] == "pass_sonnet_confirmed_shop"
+    assert decide(PASS, HOLD, False, True) == {"decision": "hold", "reason": "hold_sonnet_verdict", "d1a_state": "HOLD", "routed_because": "shop_page"}
+    assert decide(PASS, CANNOT, False, True)["reason"] == "hold_sonnet_cannot_tell"
+    for broken in (FAILED, ERROR):      # a shop-routed Sonnet call that fails holds, as a short pass does
+        assert (decide(PASS, broken, False, True)["decision"], decide(PASS, broken, False, True)["reason"]) == ("hold", "hold_sonnet_failed")
+
+
 # (row, haiku, short, sonnet, decision, reason, routed_because)
 ROWS = [
     (5, PASS, False, None, "pass", "pass_haiku", None),

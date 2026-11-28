@@ -18,8 +18,9 @@ testpaths = ["tests"]
 markers = [
   "stack: needs the Docker compose stack; skipped by default",
   "live: needs real API keys; skipped by default",
+  "eval: real Haiku/Sonnet calls on the known-failure cases (spends through the ledger); run by path: pytest -m eval evals/llm_tests",
 ]
-addopts = "-m 'not stack and not live'"
+addopts = "-m 'not stack and not live and not eval'"
 
 [tool.setuptools]
 packages = ["llm_url_scan"]
